@@ -38,3 +38,9 @@ See the [CONTRIBUTING](CONTRIBUTING.md) file for how to help out.
 ## License
 rtpcap is BSD licensed, as found in the [LICENSE](LICENSE) file.
 
+## Other
+
+[Terms of use](https://opensource.facebook.com/legal/terms).
+
+[Privacy Policy](https://opensource.facebook.com/legal/privacy).
+
