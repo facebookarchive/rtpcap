@@ -454,6 +454,7 @@ def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
     # 1. calculate output data
     out_data = []
     rtp_timestamp = None
+    initial_rtp_timestamp = None
     first_frame_time_epoch = None
     first_frame_time_relative = None
     last_frame_time_epoch = None
@@ -464,6 +465,7 @@ def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
         # first packet
         if rtp_timestamp is None or first_frame_time_epoch is None:
             rtp_timestamp = pkt['rtp_timestamp']
+            initial_rtp_timestamp = pkt['rtp_timestamp']
             first_frame_time_epoch = pkt['frame_time_epoch']
             first_frame_time_relative = pkt['frame_time_relative']
             last_frame_time_epoch = pkt['frame_time_epoch']
@@ -478,13 +480,16 @@ def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
             # new frame: process data from old frame
             intra_latency = last_frame_time_epoch - first_frame_time_epoch
             inter_latency = pkt['frame_time_epoch'] - first_frame_time_epoch
+            rtp_timestamp_latency = pkt['rtp_timestamp'] - rtp_timestamp
             out_data.append([first_frame_time_epoch,
                              first_frame_time_relative,
+                             rtp_timestamp - initial_rtp_timestamp,
                              cum_pkts,
                              cum_bits,
                              frame_video_type,
                              intra_latency,
-                             inter_latency])
+                             inter_latency,
+                             rtp_timestamp_latency])
             rtp_timestamp = pkt['rtp_timestamp']
             first_frame_time_epoch = pkt['frame_time_epoch']
             first_frame_time_relative = pkt['frame_time_relative']
@@ -510,26 +515,32 @@ def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
     # flush data
     intra_latency = last_frame_time_epoch - first_frame_time_epoch
     inter_latency = pkt['frame_time_epoch'] - first_frame_time_epoch
+    rtp_timestamp_latency = pkt['rtp_timestamp'] - rtp_timestamp
     out_data.append([first_frame_time_epoch,
                      first_frame_time_relative,
+                     rtp_timestamp - initial_rtp_timestamp,
                      cum_pkts,
                      cum_bits,
                      frame_video_type,
                      intra_latency,
-                     inter_latency])
+                     inter_latency,
+                     rtp_timestamp_latency])
 
     # 2. dump output data
     output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
         prefix, mode, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s,%s,%s,%s,%s\n' % (
-            'frame_time_epoch', 'frame_time_relative', 'packets', 'bits',
-            'frame_video_type', 'intra_latency', 'inter_latency'))
-        for (frame_time_epoch, frame_time_relative, cum_pkts, cum_bits,
-                frame_video_type, intra_latency, inter_latency) in out_data:
-            f.write('%f,%f,%i,%i,%s,%f,%f\n' % (
-                frame_time_epoch, frame_time_relative, cum_pkts, cum_bits,
-                frame_video_type, intra_latency, inter_latency))
+        f.write('# %s,%s,%s,%s,%s,%s,%s,%s,%s\n' % (
+            'frame_time_epoch', 'frame_time_relative', 'rtp_timestamp',
+            'packets', 'bits', 'frame_video_type', 'intra_latency',
+            'inter_latency', 'rtp_timestamp_latency'))
+        for (frame_time_epoch, frame_time_relative, rtp_timestamp,
+                cum_pkts, cum_bits, frame_video_type, intra_latency,
+                inter_latency, rtp_timestamp_latency) in out_data:
+            f.write('%f,%f,%i,%i,%i,%s,%f,%f,%i\n' % (
+                frame_time_epoch, frame_time_relative, rtp_timestamp,
+                cum_pkts, cum_bits, frame_video_type, intra_latency,
+                inter_latency, rtp_timestamp_latency))
 
 
 def get_video_rtp_p_type(p_type_dict, saddr, options):
