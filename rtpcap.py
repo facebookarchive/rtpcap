@@ -316,6 +316,7 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
     last_frame_time_epoch = None
     cum_bits = 0
     rtp_seq_list = []
+    rtp_timestamp_list = []
     for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
         if last_frame_time_relative is None:
             last_frame_time_relative = pkt['frame_time_relative']
@@ -325,9 +326,11 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
             out_data.append([last_frame_time_relative,
                              last_frame_time_epoch,
                              cum_bits,
-                             rtp_seq_list])
+                             rtp_seq_list,
+                             rtp_timestamp_list])
             cum_bits = 0
             rtp_seq_list = []
+            rtp_timestamp_list = []
             # insert zeroes where no data is present
             delta_time = pkt['frame_time_relative'] - last_frame_time_relative
             zero_elements = int((delta_time - options.period_sec) /
@@ -337,6 +340,7 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                 out_data.append([last_frame_time_relative + time_delta,
                                  last_frame_time_epoch + time_delta,
                                  0,
+                                 [],
                                  []])
 
             last_frame_time_relative = pkt['frame_time_relative']
@@ -344,25 +348,28 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
         # account for current packet
         cum_bits += pkt['ip_len'] * 8
         rtp_seq_list.append(pkt['rtp_seq'])
+        rtp_timestamp_list.append(pkt['rtp_timestamp'])
     # flush data
     out_data.append([last_frame_time_relative,
                      last_frame_time_epoch,
                      cum_bits,
-                     rtp_seq_list])
+                     rtp_seq_list,
+                     rtp_timestamp_list])
 
     # 2. dump output data
     output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
         prefix, mode, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s,%s\n' % (
+        f.write('# %s,%s,%s,%s,%s\n' % (
             'frame_time_relative', 'frame_time_epoch',
-            'bitrate_last_interval', 'rtp_seq_list'))
+            'bitrate_last_interval', 'rtp_seq_list', 'rtp_timestamp_list'))
         for (frame_time_relative, frame_time_epoch, bits,
-                rtp_seq_list) in out_data:
-            f.write('%f,%f,%i,%s\n' % (
+                rtp_seq_list, rtp_timestamp_list) in out_data:
+            f.write('%f,%f,%i,%s,%s\n' % (
                 frame_time_relative, frame_time_epoch,
                 int(bits / options.period_sec),
-                ':'.join([str(i) for i in rtp_seq_list])))
+                ':'.join([str(i) for i in rtp_seq_list]),
+                ':'.join([str(i) for i in rtp_timestamp_list])))
 
 
 def analyze_video_basic(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
