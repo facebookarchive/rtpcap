@@ -34,6 +34,8 @@ ANALYSIS_TYPES = {
     'all',
 }
 
+OUTPUT_HEADERS = {}
+
 
 def run(command, options, **kwargs):
     env = kwargs.get('env', None)
@@ -222,8 +224,13 @@ def process_connection(infile, conn, prefix, options):
                                       rtp_ssrc, options)
 
 
+OUTPUT_HEADERS['audio-jitter'] = (
+    'frame_time_epoch', 'frame_time_relative', 'delta_time', 'average_delta',
+    'rtp_ext_rfc5285_data',
+)
+
+
 def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
-    mode = 'audio.jitter'
     # 1. calculate output data
     out_data = []
     last_frame_time_relative = None
@@ -237,18 +244,17 @@ def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
                          delta_time, pkt['rtp_ext_rfc5285_data']])
         last_frame_time_relative = pkt['frame_time_relative']
 
-    # 2. dump data
     total_delta = sum(delta_time for _, _, delta_time, _ in out_data)
     samples = len(out_data)
     average_delta = total_delta / samples
+
+    # 2. dump data
     output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
-        prefix, mode, ip_src, rtp_ssrc)
+        prefix, options.analysis_type, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s,%s,%s\n' % ('frame_time_epoch',
-                                        'frame_time_relative',
-                                        'delta_time',
-                                        'average_delta',
-                                        'rtp_ext_rfc5285_data'))
+        output_headers = OUTPUT_HEADERS[options.analysis_type]
+        header = '# %s\n' % ','.join(['%s'] * len(output_headers))
+        f.write(header % output_headers)
         for (frame_time_epoch, frame_time_relative, delta_time,
              rtp_ext_rfc5285_data) in out_data:
             f.write('%f,%f,%f,%f,%s\n' % (frame_time_epoch,
@@ -338,8 +344,12 @@ def get_packets_loss_and_out_of_order(rtp_seq_prev, rtp_seq_list):
     return ploss, porder, rtp_seq_max
 
 
+OUTPUT_HEADERS['audio-ploss'] = (
+    'frame_time_epoch', 'frame_time_relative', 'delta_rtp_seq', 'dup',
+)
+
+
 def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
-    mode = 'audio.ploss'
     # 1. calculate output data
     out_data = []
     last_rtp_seq = -1
@@ -370,18 +380,25 @@ def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
 
     # 2. dump data
     output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
-        prefix, mode, ip_src, rtp_ssrc)
+        prefix, options.analysis_type, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s,%s\n' % ('frame_time_epoch', 'frame_time_relative',
-                                     'delta_rtp_seq', 'dup'))
-        for frame_time_epoch, frame_time_relative, delta_rtp_seq, dup in out_data:
+        output_headers = OUTPUT_HEADERS[options.analysis_type]
+        header = '# %s\n' % ','.join(['%s'] * len(output_headers))
+        f.write(header % output_headers)
+        for (frame_time_epoch, frame_time_relative, delta_rtp_seq,
+             dup) in out_data:
             f.write('%f,%f,%i,%s\n' % (frame_time_epoch, frame_time_relative,
                                        delta_rtp_seq, dup))
 
 
+OUTPUT_HEADERS['network-bitrate'] = (
+    'frame_time_relative', 'frame_time_epoch', 'pkts', 'ploss', 'porder',
+    'bitrate_last_interval', 'rtp_seq_list', 'rtp_timestamp_list',
+)
+
+
 def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                             options):
-    mode = 'network.bitrate'
     # 1. calculate output data
     out_data = []
     last_frame_time_relative = None
@@ -449,14 +466,13 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                      rtp_seq_list,
                      rtp_timestamp_list])
 
-    # 2. dump output data
+    # 2. dump data
     output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
-        prefix, mode, ip_src, rtp_ssrc)
+        prefix, options.analysis_type, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s,%s,%s,%s,%s,%s\n' % (
-            'frame_time_relative', 'frame_time_epoch', 'pkts',
-            'ploss', 'porder', 'bitrate_last_interval', 'rtp_seq_list',
-            'rtp_timestamp_list'))
+        output_headers = OUTPUT_HEADERS[options.analysis_type]
+        header = '# %s\n' % ','.join(['%s'] * len(output_headers))
+        f.write(header % output_headers)
         for (frame_time_relative, frame_time_epoch, cum_pkts,
                 ploss, porder, cum_bits,
                 rtp_seq_list, rtp_timestamp_list) in out_data:
@@ -467,9 +483,14 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                 ':'.join([str(i) for i in rtp_timestamp_list])))
 
 
+OUTPUT_HEADERS['video-basic'] = (
+    'frame_time_relative', 'frame_time_epoch', 'framerate_last_interval',
+    'packetrate_last_interval', 'bitrate_last_interval',
+)
+
+
 def analyze_video_basic(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                         options):
-    mode = 'video.basic'
     # 1. calculate output data
     out_data = []
     last_frame_time_relative = None
@@ -521,14 +542,13 @@ def analyze_video_basic(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                      cum_pkts,
                      cum_bits])
 
-    # 2. dump output data
+    # 2. dump data
     output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
-        prefix, mode, ip_src, rtp_ssrc)
+        prefix, options.analysis_type, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s,%s,%s\n' % (
-            'frame_time_relative', 'frame_time_epoch',
-            'framerate_last_interval', 'packetrate_last_interval',
-            'bitrate_last_interval'))
+        output_headers = OUTPUT_HEADERS[options.analysis_type]
+        header = '# %s\n' % ','.join(['%s'] * len(output_headers))
+        f.write(header % output_headers)
         for (frame_time_relative, frame_time_epoch, frames, pkts,
                 bits) in out_data:
             f.write('%f,%f,%i,%i,%i\n' % (
@@ -536,6 +556,13 @@ def analyze_video_basic(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                 int(frames / options.period_sec),
                 int(pkts / options.period_sec),
                 int(bits / options.period_sec)))
+
+
+OUTPUT_HEADERS['video-latency'] = (
+    'frame_time_epoch', 'frame_time_relative', 'rtp_timestamp',
+    'packets', 'bits', 'frame_video_type', 'intra_latency',
+    'inter_latency', 'rtp_timestamp_latency',
+)
 
 
 # video-latency measures per-frame latency and inter-frame latency.
@@ -554,7 +581,6 @@ def analyze_video_basic(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
 # (2) inter-frame latency, measured as the time between the first packets
 # of 2 consecutive frames.
 def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
-    mode = 'video.latency'
     # 1. calculate output data
     out_data = []
     rtp_timestamp = None
@@ -630,14 +656,13 @@ def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
                      inter_latency,
                      rtp_timestamp_latency])
 
-    # 2. dump output data
+    # 2. dump data
     output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
-        prefix, mode, ip_src, rtp_ssrc)
+        prefix, options.analysis_type, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s,%s,%s,%s,%s,%s,%s\n' % (
-            'frame_time_epoch', 'frame_time_relative', 'rtp_timestamp',
-            'packets', 'bits', 'frame_video_type', 'intra_latency',
-            'inter_latency', 'rtp_timestamp_latency'))
+        output_headers = OUTPUT_HEADERS[options.analysis_type]
+        header = '# %s\n' % ','.join(['%s'] * len(output_headers))
+        f.write(header % output_headers)
         for (frame_time_epoch, frame_time_relative, rtp_timestamp,
                 cum_pkts, cum_bits, frame_video_type, intra_latency,
                 inter_latency, rtp_timestamp_latency) in out_data:
@@ -901,10 +926,12 @@ def get_options(argv):
                         metavar='ANALYSIS_TYPE',
                         help='analysis type %r' % ANALYSIS_TYPES,)
     for analysis in ANALYSIS_TYPES:
+        analysis_help = 'analysis type: %s (%r)' % (analysis,
+            OUTPUT_HEADERS[analysis] if analysis != 'all' else '')
         parser.add_argument('--%s' % analysis, action='store_const',
                             dest='analysis_type', const=analysis,
                             metavar='ANALYSIS_TYPE',
-                            help='analysis type: %s' % analysis,)
+                            help=analysis_help,)
     parser.add_argument('--filter', action='store', type=str,
                         dest='filter',
                         default=default_values['filter'],
