@@ -29,7 +29,7 @@ ANALYSIS_TYPES = {
     'audio-ploss',
     'network-bitrate',
     'video-basic',
-    'video-pacing',
+    'video-latency',
     'all',
 }
 
@@ -215,9 +215,9 @@ def process_connection(infile, udp_connections, conn, prefix, options):
             elif options.analysis_type == 'video-basic':
                 analyze_video_basic(infile, parsed_rtp_list, ip_src,
                                     rtp_ssrc, options)
-            elif options.analysis_type == 'video-pacing':
-                analyze_video_pacing(infile, parsed_rtp_list, ip_src,
-                                     rtp_ssrc, options)
+            elif options.analysis_type == 'video-latency':
+                analyze_video_latency(infile, parsed_rtp_list, ip_src,
+                                      rtp_ssrc, options)
 
 
 def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
@@ -434,33 +434,38 @@ def analyze_video_basic(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                 int(bits / options.period_sec)))
 
 
-# video-pacing measures per-frame latency, defined as "time between the
-# first packet of each frame, and the last packet of the same frame *that
-# arrives before the first packet of the next frame*. This means that,
-# if packets from frame `A` arrive at times `A1..An`, followed by packets
-# from frame `B` arriving at times `B1..Bn`, and
-# `A1 < A2 < ... < Aj < B1 < Aj+1 < An`, then video-pacing is measuring
-# `Aj - A1`. This is similar (but not exactly the same) than "time
-# between the first and last packets of a frame", which is what we really
-# want to measure. This would be `An - A1`. This slightly-modified
-# definition makes the implementation much easier, and should not make
-# much of a difference, as packets are always sent in order (i.e.
-# `An < B1` at the sender).
-def analyze_video_pacing(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
-    mode = 'video.pacing'
+# video-latency measures per-frame latency and inter-frame latency.
+# (1) intra-frame latency: time between the first packet of each frame,
+# and the last packet of the same frame *that arrives before the first
+# packet of the next frame*. Let's assume that packets from frame `A`
+# arrive at times `A1..Am`, and packets from frame `B` arrive at times
+# `B1..Bn`. Our goal is to measure "time between the first and last
+# packets of a frame", or `Am - A1` for frame A. Instead, we measure
+# `Aj - A1`, where `Aj` is the last frame of A before the first frame
+# from B. For example, if `A1 < A2 < ... < Aj < Bk < Aj+1 < Am`, then
+# video-latency measures `Aj - A1`. This slightly-modified definition
+# makes the implementation much easier, and should not make much of
+# a difference, as packets are always sent in order (i.e.  `An < B1`
+# at the sender).
+# (2) inter-frame latency, measured as the time between the first packets
+# of 2 consecutive frames.
+def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
+    mode = 'video.latency'
     # 1. calculate output data
     out_data = []
     rtp_timestamp = None
-    frame_time_epoch = None
+    first_frame_time_epoch = None
+    first_frame_time_relative = None
     last_frame_time_epoch = None
     cum_bits = 0
     cum_pkts = 0
     frame_video_type = 'P'
     for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
         # first packet
-        if rtp_timestamp is None or frame_time_epoch is None:
+        if rtp_timestamp is None or first_frame_time_epoch is None:
             rtp_timestamp = pkt['rtp_timestamp']
-            frame_time_epoch = pkt['frame_time_epoch']
+            first_frame_time_epoch = pkt['frame_time_epoch']
+            first_frame_time_relative = pkt['frame_time_relative']
             last_frame_time_epoch = pkt['frame_time_epoch']
             cum_bits = 0
             cum_pkts = 0
@@ -471,14 +476,18 @@ def analyze_video_pacing(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
             continue
         elif pkt['rtp_timestamp'] > rtp_timestamp:
             # new frame: process data from old frame
-            latency = last_frame_time_epoch - frame_time_epoch
-            out_data.append([frame_time_epoch,
+            intra_latency = last_frame_time_epoch - first_frame_time_epoch
+            inter_latency = pkt['frame_time_epoch'] - first_frame_time_epoch
+            out_data.append([first_frame_time_epoch,
+                             first_frame_time_relative,
                              cum_pkts,
                              cum_bits,
                              frame_video_type,
-                             latency])
+                             intra_latency,
+                             inter_latency])
             rtp_timestamp = pkt['rtp_timestamp']
-            frame_time_epoch = pkt['frame_time_epoch']
+            first_frame_time_epoch = pkt['frame_time_epoch']
+            first_frame_time_relative = pkt['frame_time_relative']
             last_frame_time_epoch = pkt['frame_time_epoch']
             cum_bits = 0
             cum_pkts = 0
@@ -499,24 +508,28 @@ def analyze_video_pacing(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
         last_frame_time_epoch = pkt['frame_time_epoch']
 
     # flush data
-    out_data.append([frame_time_epoch,
+    intra_latency = last_frame_time_epoch - first_frame_time_epoch
+    inter_latency = pkt['frame_time_epoch'] - first_frame_time_epoch
+    out_data.append([first_frame_time_epoch,
+                     first_frame_time_relative,
                      cum_pkts,
                      cum_bits,
                      frame_video_type,
-                     latency])
+                     intra_latency,
+                     inter_latency])
 
     # 2. dump output data
     output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
         prefix, mode, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s,%s,%s\n' % (
-            'frame_time_epoch', 'packets', 'bits', 'frame_video_type',
-            'latency'))
-        for (frame_time_epoch, cum_pkts, cum_bits, frame_video_type,
-                latency) in out_data:
-            f.write('%f,%i,%i,%s,%f\n' % (
-                frame_time_epoch, cum_pkts, cum_bits, frame_video_type,
-                latency))
+        f.write('# %s,%s,%s,%s,%s,%s,%s\n' % (
+            'frame_time_epoch', 'frame_time_relative', 'packets', 'bits',
+            'frame_video_type', 'intra_latency', 'inter_latency'))
+        for (frame_time_epoch, frame_time_relative, cum_pkts, cum_bits,
+                frame_video_type, intra_latency, inter_latency) in out_data:
+            f.write('%f,%f,%i,%i,%s,%f,%f\n' % (
+                frame_time_epoch, frame_time_relative, cum_pkts, cum_bits,
+                frame_video_type, intra_latency, inter_latency))
 
 
 def get_video_rtp_p_type(p_type_dict, saddr, options):
