@@ -599,7 +599,6 @@ def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
     # 1. calculate output data
     out_data = []
     rtp_timestamp = None
-    initial_rtp_timestamp = None
     first_frame_time_relative = None
     first_frame_time_epoch = None
     last_frame_time_epoch = None
@@ -610,7 +609,6 @@ def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
         # first packet
         if rtp_timestamp is None or first_frame_time_epoch is None:
             rtp_timestamp = pkt['rtp_timestamp']
-            initial_rtp_timestamp = pkt['rtp_timestamp']
             first_frame_time_epoch = pkt['frame_time_epoch']
             first_frame_time_relative = pkt['frame_time_relative']
             last_frame_time_epoch = pkt['frame_time_epoch']
@@ -628,7 +626,7 @@ def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
             rtp_timestamp_latency = pkt['rtp_timestamp'] - rtp_timestamp
             out_data.append([first_frame_time_relative,
                              first_frame_time_epoch,
-                             rtp_timestamp - initial_rtp_timestamp,
+                             rtp_timestamp,
                              cum_pkts,
                              cum_bits,
                              frame_video_type,
@@ -663,7 +661,7 @@ def analyze_video_latency(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
     rtp_timestamp_latency = pkt['rtp_timestamp'] - rtp_timestamp
     out_data.append([first_frame_time_relative,
                      first_frame_time_epoch,
-                     rtp_timestamp - initial_rtp_timestamp,
+                     rtp_timestamp,
                      cum_pkts,
                      cum_bits,
                      frame_video_type,
