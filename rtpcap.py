@@ -16,6 +16,11 @@ default_values = {
 }
 
 
+IPV4_PATTERN = r'\d+\.\d+\.\d+\.\d+'
+IPV6_PATTERN = r'[a-fA-F\d:]+'
+IP_PATTERN = r'[a-fA-F\d:\.]+'
+
+
 def run(command, options, **kwargs):
     env = kwargs.get('env', None)
     stdin = subprocess.PIPE if kwargs.get('stdin', False) else None
@@ -72,11 +77,9 @@ def analyze_udp_connections(infile, options):
 
 
 def get_addr_proto(addr):
-    ipv4_pattern = r'^\d+\.\d+\.\d+\.\d+:?'
-    ipv6_pattern = r'^[a-fA-F\d:]+'
-    if re.search(ipv4_pattern, addr):
+    if re.search(IPV4_PATTERN, addr):
         return 'ip'
-    elif re.search(ipv6_pattern, addr):
+    elif re.search(IPV6_PATTERN, addr):
         return 'ipv6'
     return None
 
@@ -85,9 +88,9 @@ def parse_udp_connections(out, options):
     output = []
     # example: '192.168.1.32:5353          <-> 224.0.0.251:5353                 0         0       8      4276       8      4276     0.560657000         7.6643'
     conn_pattern = (
-        r'(?P<laddr>[\da-fA-F\.\:]*):(?P<lport>\d*) *'
+        r'(?P<laddr>' + IP_PATTERN + r'):(?P<lport>\d*) *'
         r' <-> '
-        r'(?P<raddr>[\da-fA-F\.\:]*):(?P<rport>\d*) *'
+        r'(?P<raddr>' + IP_PATTERN + r'):(?P<rport>\d*) *'
         r'(?P<rpkts>\d*) *'
         r'(?P<rbytes>\d*) *'
         r'(?P<lpkts>\d*) *'
@@ -170,7 +173,8 @@ def analyze_rtp_data(infile, saddr, sport, proto, options):
                '-n -T fields -e frame.number -e frame.time_epoch '
                '-e %s -e %s '
                '-e rtp.p_type -e rtcp.pt -e rtp.seq -e rtp.timestamp '
-               '-e rtp.marker' % (infile, sport, ipsrc_field, iplen_field))
+               '-e rtp.marker' % (
+                   infile, sport, ipsrc_field, iplen_field))
     returncode, out, err = run(command, options)
     if returncode != 0:
         print('Cannot run "%s": "%s"' % (command, err))
@@ -314,7 +318,7 @@ def parse_rtp_data(out, saddr, options):
     pkt_pattern = (
         r'(?P<frame_number>\d+)\t'
         r'(?P<frame_time_epoch>[\d\.]+)\t'
-        r'(?P<ipsrc>[\da-fA-F\.\:]+)\t'
+        r'(?P<ipsrc>' + IP_PATTERN + r')\t'
         r'(?P<iplen>\d+)\t'
         r'(?P<rtp_p_type>\d*)\t'  # optional
         r'(?P<rtcp_pt>\d*)\t*'  # optional
