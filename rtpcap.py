@@ -228,19 +228,27 @@ def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
             continue
         # account for current packet
         delta_time = pkt['frame_time_relative'] - last_frame_time_relative
-        out_data.append([pkt['frame_time_relative'], delta_time])
+        out_data.append([pkt['frame_time_epoch'], pkt['frame_time_relative'],
+                         delta_time, pkt['rtp_ext_rfc5285_data']])
         last_frame_time_relative = pkt['frame_time_relative']
 
     # 2. dump data
-    total_delta = sum(delta_time for _, delta_time in out_data)
+    total_delta = sum(delta_time for _, _, delta_time, _ in out_data)
     samples = len(out_data)
     average_delta = total_delta / samples
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s\n' % ('frame_time_relative', 'delta_time',
-                                  'average_delta'))
-        for frame_time_relative, delta_time in out_data:
-            f.write('%f,%f,%f\n' % (frame_time_relative, delta_time,
-                                    average_delta))
+        f.write('# %s,%s,%s,%s,%s\n' % ('frame_time_epoch',
+                                        'frame_time_relative',
+                                        'delta_time',
+                                        'average_delta',
+                                        'rtp_ext_rfc5285_data'))
+        for (frame_time_epoch, frame_time_relative, delta_time,
+             rtp_ext_rfc5285_data) in out_data:
+            f.write('%f,%f,%f,%f,%s\n' % (frame_time_epoch,
+                                          frame_time_relative,
+                                          delta_time,
+                                          average_delta,
+                                          rtp_ext_rfc5285_data))
 
 
 # returns a number between [-32k, 32k)
@@ -274,8 +282,8 @@ def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
             continue
         # add packet information
         delta_rtp_seq = rtp_ploss_diff(pkt['rtp_seq'], last_rtp_seq)
-        out_data.append([pkt['frame_time_relative'], delta_rtp_seq,
-                         'dup' if is_dup else ''])
+        out_data.append([pkt['frame_time_epoch'], pkt['frame_time_relative'],
+                         delta_rtp_seq, 'dup' if is_dup else ''])
         # update last RTP seq number on non-dups
         if not is_dup:
             last_rtp_seq = pkt['rtp_seq']
@@ -284,10 +292,11 @@ def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
     output_file = '%s.audio.ploss.ip_src_%s.rtp_ssrc_%s.csv' % (
         prefix, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s\n' % ('frame_time_relative', 'delta_rtp_seq',
-                                  'dup'))
-        for frame_time_relative, delta_rtp_seq, dup in out_data:
-            f.write('%f,%i,%s\n' % (frame_time_relative, delta_rtp_seq, dup))
+        f.write('# %s,%s,%s,%s\n' % ('frame_time_epoch', 'frame_time_relative',
+                                     'delta_rtp_seq', 'dup'))
+        for frame_time_epoch, frame_time_relative, delta_rtp_seq, dup in out_data:
+            f.write('%f,%f,%i,%s\n' % (frame_time_epoch, frame_time_relative,
+                                       delta_rtp_seq, dup))
 
 
 def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
@@ -454,7 +463,7 @@ def analyze_rtp_data(infile, conn_filter, sport, proto, options):
                '-e frame.time_epoch -e frame.time_relative '
                '-e %s -e %s '
                '-e rtp.p_type -e rtcp.pt -e rtp.ssrc -e rtp.seq '
-               '-e rtp.timestamp -e rtp.marker' % (
+               '-e rtp.timestamp -e rtp.marker -e rtp.ext.rfc5285.data' % (
                    infile, sport, conn_filter, ip_src_field, ip_len_field))
     returncode, out, err = run(command, options)
     tshark_error_check(returncode, out, err, command)
@@ -583,7 +592,7 @@ def parse_rtp_data(out, options):
     parsed_rtcp_list = {}
     # example (rtp): '2\t1584723835.328870000\t0.0\t'
     #                '2a03:2880:f231:cd:face:b00c:0:6443\t1135\t98\t\t'
-    #                '0xd7346929\t27012\t1122654371\t0'
+    #                '0xd7346929\t27012\t1122654371\t0\tc3'
     # example (rtcp): '3\t1584373728.001695000\t0.00001\t''
     #                 '2601:647:4300:f039:e97a:e051:b8a8:a4da\t\t205'
     pkt_pattern = (
@@ -597,7 +606,8 @@ def parse_rtp_data(out, options):
         r'(?P<rtp_ssrc>0x[\da-fA-F]*)\t*'  # optional
         r'(?P<rtp_seq>\d*)\t*'  # optional
         r'(?P<rtp_timestamp>\d*)\t*'  # optional
-        r'(?P<rtp_marker>\d*)'  # optional
+        r'(?P<rtp_marker>\d*)\t*'  # optional
+        r'(?P<rtp_ext_rfc5285_data>[\da-fA-F]*)'  # optional
     )
     for line in out.splitlines():
         line = line.decode('ascii').strip()
@@ -625,6 +635,9 @@ def parse_rtp_data(out, options):
             entry['rtp_seq'] = int(entry['rtp_seq'])
             entry['rtp_timestamp'] = int(entry['rtp_timestamp'])
             entry['rtp_marker'] = int(entry['rtp_marker'])
+            if entry['rtp_ext_rfc5285_data']:
+                entry['rtp_ext_rfc5285_data'] = int(
+                    entry['rtp_ext_rfc5285_data'], 16)
             if ip_src not in parsed_rtp_list:
                 parsed_rtp_list[ip_src] = {}
             if rtp_ssrc not in parsed_rtp_list[ip_src]:
@@ -637,6 +650,7 @@ def parse_rtp_data(out, options):
             del entry['rtp_seq']
             del entry['rtp_timestamp']
             del entry['rtp_marker']
+            del entry['rtp_ext_rfc5285_data']
             if ip_src not in parsed_rtcp_list:
                 parsed_rtcp_list[ip_src] = []
             parsed_rtcp_list[ip_src].append(entry)
