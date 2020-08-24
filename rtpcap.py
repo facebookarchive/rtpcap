@@ -225,8 +225,8 @@ def process_connection(infile, conn, prefix, options):
 
 
 OUTPUT_HEADERS['audio-jitter'] = (
-    'frame_time_relative', 'frame_time_epoch', 'delta_time', 'average_delta',
-    'rtp_ext_rfc5285_data',
+    'frame_time_relative', 'frame_time_epoch', 'ip_len', 'delta_time',
+    'average_delta', 'rtp_ext_rfc5285_data',
 )
 
 
@@ -240,11 +240,14 @@ def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
             continue
         # account for current packet
         delta_time = pkt['frame_time_relative'] - last_frame_time_relative
-        out_data.append([pkt['frame_time_relative'], pkt['frame_time_epoch'],
-                         delta_time, pkt['rtp_ext_rfc5285_data']])
+        out_data.append([pkt['frame_time_relative'],
+                         pkt['frame_time_epoch'],
+                         pkt['ip_len'],
+                         delta_time,
+                         pkt['rtp_ext_rfc5285_data']])
         last_frame_time_relative = pkt['frame_time_relative']
 
-    total_delta = sum(delta_time for _, _, delta_time, _ in out_data)
+    total_delta = sum(delta_time for _, _, _, delta_time, _ in out_data)
     samples = len(out_data)
     average_delta = total_delta / samples
 
@@ -255,13 +258,14 @@ def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
         output_headers = OUTPUT_HEADERS[options.analysis_type]
         header = '# %s\n' % ','.join(['%s'] * len(output_headers))
         f.write(header % output_headers)
-        for (frame_time_relative, frame_time_epoch, delta_time,
+        for (frame_time_relative, frame_time_epoch, ip_len, delta_time,
              rtp_ext_rfc5285_data) in out_data:
-            f.write('%f,%f,%f,%f,%s\n' % (frame_time_relative,
-                                          frame_time_epoch,
-                                          delta_time,
-                                          average_delta,
-                                          rtp_ext_rfc5285_data))
+            f.write('%f,%f,%i,%f,%f,%s\n' % (frame_time_relative,
+                                             frame_time_epoch,
+                                             ip_len,
+                                             delta_time,
+                                             average_delta,
+                                             rtp_ext_rfc5285_data))
 
 
 # returns a number between [-32k, 32k)
