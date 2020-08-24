@@ -78,13 +78,21 @@ def parse_file(infile, options):
     process_connection(infile, udp_connections, conn, prefix, options)
 
 
+def tshark_error_check(returncode, out, err, command):
+    if (returncode == 2 and
+            b'appears to have been cut short in the middle of a packet' in err):
+        # we are ok with pcap traces cut short
+        pass
+    elif returncode != 0:
+        print('Cannot run "%s": "%s"' % (command, err))
+        sys.exit(-1)
+
+
 # get heavy hitters
 def analyze_udp_connections(infile, options):
     command = 'tshark -r %s -q -z conv,udp' % infile
     returncode, out, err = run(command, options)
-    if returncode != 0:
-        print('Cannot run "%s": "%s"' % (command, err))
-        sys.exit(-1)
+    tshark_error_check(returncode, out, err, command)
     # parse the output
     return parse_udp_connections(out, options)
 
@@ -361,9 +369,7 @@ def analyze_rtp_data(infile, conn_filter, sport, proto, options):
                '-e rtp.timestamp -e rtp.marker' % (
                    infile, sport, conn_filter, ip_src_field, ip_len_field))
     returncode, out, err = run(command, options)
-    if returncode != 0:
-        print('Cannot run "%s": "%s"' % (command, err))
-        sys.exit(-1)
+    tshark_error_check(returncode, out, err, command)
     parsed_rtp_list, _ = parse_rtp_data(out, options)
     return parsed_rtp_list
 
