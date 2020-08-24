@@ -71,7 +71,7 @@ def parse_file(infile, options):
     if options.debug > 2:
         for d in udp_connections:
             print(d)
-    for i in range(options.connections):
+    for i in range(min(options.connections, len(udp_connections))):
         conn = udp_connections[i]
         if options.debug > 0:
             print('connection {{ left: {laddr}:{lport} '
