@@ -338,17 +338,18 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
             delta_time = pkt['frame_time_relative'] - last_frame_time_relative
             zero_elements = int((delta_time - options.period_sec) /
                                 options.period_sec)
-            for i in range(zero_elements):
-                time_delta = (i + 1) * options.period_sec
-                out_data.append([last_frame_time_relative + time_delta,
-                                 last_frame_time_epoch + time_delta,
+            for _i in range(zero_elements):
+                last_frame_time_relative += options.period_sec
+                last_frame_time_epoch += options.period_sec
+                out_data.append([last_frame_time_relative,
+                                 last_frame_time_epoch,
                                  0,
                                  0,
                                  [],
                                  []])
 
-            last_frame_time_relative = pkt['frame_time_relative']
-            last_frame_time_epoch = pkt['frame_time_epoch']
+            last_frame_time_relative += options.period_sec
+            last_frame_time_epoch += options.period_sec
         # account for current packet
         cum_pkts += 1
         cum_bits += pkt['ip_len'] * 8
