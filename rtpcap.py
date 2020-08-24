@@ -308,10 +308,11 @@ def rtp_seq_get_min(rtp_seq1, rtp_seq2):
     return rtp_seq2 if (rtp_seq_cmp(rtp_seq2, rtp_seq1) < 0) else rtp_seq1
 
 
-# estimates the number of packet losses (ploss) and reorderings (porder)
-# of a list of RTP sequence numbers. Returns {ploss, porder, rtp_seq_max}
-# where `rtp_seq_max` is the highest rtp sequence number see so far.
-# Accepts the previous highest rtp sequence number (`rtp_seq_prev`)
+# estimates the number of packet losses (ploss), reorderings (porder),
+# and duplicates (pdups) of a list of RTP sequence numbers. Returns
+# {ploss, porder, pdups, rtp_seq_max}, where `rtp_seq_max` is the highest
+# rtp sequence number see so far.
+# Input also includes the previous highest rtp sequence number (`rtp_seq_prev`)
 #
 # Algorithm explanation
 # * run through the `rtp_seq_list` calculating the deltas between each
@@ -321,27 +322,33 @@ def rtp_seq_get_min(rtp_seq1, rtp_seq2):
 #     negative deltas
 #   * keep the max value at all times
 # * when done, `porder` is the number of negative deltas, while ploss is
-#   `rtp_seq_max` - `rtp_seq_min` - len(rtp_seq_list)
+#   `rtp_seq_max` - `rtp_seq_min` - len(set(rtp_seq_list))
 def get_packets_loss_and_out_of_order(rtp_seq_prev, rtp_seq_list):
     if len(rtp_seq_list) == 0:
-        return 0, 0, rtp_seq_prev
-    # convert rtp_seq_list in deltas
-    rtp_seq_min = None
-    rtp_seq_max = None
+        return 0, 0, 0, rtp_seq_prev
+    # finding duplicates is easy
+    if rtp_seq_prev is None:
+        full_list = rtp_seq_list
+    else:
+        full_list = [rtp_seq_prev, ] + rtp_seq_list
+    pdups = len(full_list) - len(set(full_list))
+    # convert full_list in deltas
     total_delta = 0
     num_negative_delta = 0
-    for rtp_seq in rtp_seq_list:
+    rtp_seq_prev = full_list[0]
+    rtp_seq_min = rtp_seq_prev
+    rtp_seq_max = rtp_seq_prev
+    for rtp_seq in full_list[1:]:
         rtp_seq_min = rtp_seq_get_min(rtp_seq, rtp_seq_min)
         rtp_seq_max = rtp_seq_get_max(rtp_seq, rtp_seq_max)
-        if rtp_seq_prev is not None:
-            delta = rtp_seq_delta(rtp_seq, rtp_seq_prev)
-            total_delta += delta
-            if delta < 0:
-                num_negative_delta += 1
+        delta = rtp_seq_delta(rtp_seq, rtp_seq_prev)
+        total_delta += delta
+        if delta < 0:
+            num_negative_delta += 1
         rtp_seq_prev = rtp_seq
-    ploss = rtp_seq_max - rtp_seq_min + 1 - len(rtp_seq_list)
+    ploss = rtp_seq_max - rtp_seq_min - len(set(full_list)) + 1
     porder = num_negative_delta
-    return ploss, porder, rtp_seq_max
+    return ploss, porder, pdups, rtp_seq_max
 
 
 OUTPUT_HEADERS['audio-ploss'] = (
@@ -393,7 +400,7 @@ def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
 
 OUTPUT_HEADERS['network-bitrate'] = (
     'frame_time_relative', 'frame_time_epoch', 'pkts', 'ploss', 'porder',
-    'bitrate_last_interval', 'rtp_seq_list', 'rtp_timestamp_list',
+    'pdups', 'bitrate_last_interval', 'rtp_seq_list', 'rtp_timestamp_list',
 )
 
 
@@ -414,7 +421,7 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
             last_frame_time_epoch = pkt['frame_time_epoch']
         if pkt['frame_time_relative'] > (last_frame_time_relative +
                                          options.period_sec):
-            ploss, porder, rtp_seq_list_last_rtp_seq = (
+            ploss, porder, pdups, rtp_seq_list_last_rtp_seq = (
                 get_packets_loss_and_out_of_order(rtp_seq_list_last_rtp_seq,
                                                   rtp_seq_list))
             out_data.append([last_frame_time_relative,
@@ -422,6 +429,7 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                              cum_pkts,
                              ploss,
                              porder,
+                             pdups,
                              cum_bits,
                              rtp_seq_list,
                              rtp_timestamp_list])
@@ -443,6 +451,7 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                                  0,
                                  0,
                                  0,
+                                 0,
                                  [],
                                  []])
 
@@ -454,7 +463,7 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
         rtp_seq_list.append(pkt['rtp_seq'])
         rtp_timestamp_list.append(pkt['rtp_timestamp'])
     # flush data
-    ploss, porder, rtp_seq_list_last_rtp_seq = (
+    ploss, porder, pdups, rtp_seq_list_last_rtp_seq = (
         get_packets_loss_and_out_of_order(rtp_seq_list_last_rtp_seq,
                                           rtp_seq_list))
     out_data.append([last_frame_time_relative,
@@ -462,6 +471,7 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                      cum_pkts,
                      ploss,
                      porder,
+                     pdups,
                      cum_bits,
                      rtp_seq_list,
                      rtp_timestamp_list])
@@ -474,10 +484,11 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
         header = '# %s\n' % ','.join(['%s'] * len(output_headers))
         f.write(header % output_headers)
         for (frame_time_relative, frame_time_epoch, cum_pkts,
-                ploss, porder, cum_bits,
+                ploss, porder, pdups, cum_bits,
                 rtp_seq_list, rtp_timestamp_list) in out_data:
-            f.write('%f,%f,%i,%i,%i,%i,%s,%s\n' % (
-                frame_time_relative, frame_time_epoch, cum_pkts, ploss, porder,
+            f.write('%f,%f,%i,%i,%i,%i,%i,%s,%s\n' % (
+                frame_time_relative, frame_time_epoch, cum_pkts,
+                ploss, porder, pdups,
                 int(cum_bits / options.period_sec),
                 ':'.join([str(i) for i in rtp_seq_list]),
                 ':'.join([str(i) for i in rtp_timestamp_list])))
