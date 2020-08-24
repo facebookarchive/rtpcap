@@ -208,19 +208,28 @@ def process_connection(infile, udp_connections, conn, prefix, options):
 def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
     output_file = '%s.audio.jitter.ip_src_%s.rtp_ssrc_%s.csv' % (
         prefix, ip_src, rtp_ssrc)
-    with open(output_file, 'w') as f:
-        delta_list = []
-        last_frame_time_relative = None
-        for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
-            if last_frame_time_relative is not None:
-                delta = pkt['frame_time_relative'] - last_frame_time_relative
-                delta_list.append([pkt['frame_time_relative'], delta])
+    # 1. calculate output data
+    out_data = []
+    last_frame_time_relative = None
+    for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
+        if last_frame_time_relative is None:
             last_frame_time_relative = pkt['frame_time_relative']
-        total_delta = sum(delta for _, delta in delta_list)
-        samples = len(delta_list)
-        average_delta = total_delta / samples
-        for frame_time_relative, delta in delta_list:
-            f.write('%f,%f,%f\n' % (frame_time_relative, delta, average_delta))
+            continue
+        # account for current packet
+        delta_time = pkt['frame_time_relative'] - last_frame_time_relative
+        out_data.append([pkt['frame_time_relative'], delta_time])
+        last_frame_time_relative = pkt['frame_time_relative']
+
+    # 2. dump data
+    total_delta = sum(delta_time for _, delta_time in out_data)
+    samples = len(out_data)
+    average_delta = total_delta / samples
+    with open(output_file, 'w') as f:
+        f.write('# %s,%s,%s\n' % ('frame_time_relative', 'delta_time',
+                                  'average_delta'))
+        for frame_time_relative, delta_time in out_data:
+            f.write('%f,%f,%f\n' % (frame_time_relative, delta_time,
+                                    average_delta))
 
 
 # returns a number between [-32k, 32k)
@@ -232,82 +241,95 @@ def rtp_ploss_diff(a, b):
 
 
 def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
+    # 1. calculate output data
+    out_data = []
+    last_rtp_seq = -1
+    # list of packet hashes
+    pkt_hash_set = set()
+    for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
+        # check if we have seen the packet already
+        m = hashlib.md5()
+        pkt_id = '%s:%s:%s' % (pkt['rtp_p_type'], pkt['rtp_seq'],
+                               pkt['rtp_timestamp'])
+        m.update(pkt_id.encode('utf-8'))
+        pkt_hash = m.hexdigest()
+        # if we have seen the packet before, packet is a duplicate
+        is_dup = pkt_hash in pkt_hash_set
+        if not is_dup:
+            pkt_hash_set.add(pkt_hash)
+        # process the very first packet
+        if last_rtp_seq == -1:
+            last_rtp_seq = pkt['rtp_seq']
+            continue
+        # add packet information
+        delta_rtp_seq = rtp_ploss_diff(pkt['rtp_seq'], last_rtp_seq)
+        out_data.append([pkt['frame_time_relative'], delta_rtp_seq,
+                         'dup' if is_dup else ''])
+        # update last RTP seq number on non-dups
+        if not is_dup:
+            last_rtp_seq = pkt['rtp_seq']
+
+    # 2. dump data
     output_file = '%s.audio.ploss.ip_src_%s.rtp_ssrc_%s.csv' % (
         prefix, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        delta_list = []
-        last_rtp_seq = -1
-        # list of packet hashes
-        pkt_hash_set = set()
-        for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
-            # check if we have seen the packet already
-            m = hashlib.md5()
-            pkt_id = '%s:%s:%s' % (pkt['rtp_p_type'], pkt['rtp_seq'],
-                                   pkt['rtp_timestamp'])
-            m.update(pkt_id.encode('utf-8'))
-            pkt_hash = m.hexdigest()
-            if pkt_hash in pkt_hash_set:
-                # packet is a duplicate
-                delta = rtp_ploss_diff(pkt['rtp_seq'], last_rtp_seq)
-                delta_list.append([pkt['frame_time_relative'], delta, 'dup'])
-            else:
-                pkt_hash_set.add(pkt_hash)
-                if last_rtp_seq != -1:
-                    delta = rtp_ploss_diff(pkt['rtp_seq'], last_rtp_seq)
-                    delta_list.append([pkt['frame_time_relative'], delta, ''])
-                last_rtp_seq = pkt['rtp_seq']
-        for frame_time_relative, delta, dup in delta_list:
-            f.write('%f,%i,%s\n' % (frame_time_relative, delta, dup))
+        f.write('# %s,%s,%s\n' % ('frame_time_relative', 'delta_rtp_seq',
+                                  'dup'))
+        for frame_time_relative, delta_rtp_seq, dup in out_data:
+            f.write('%f,%i,%s\n' % (frame_time_relative, delta_rtp_seq, dup))
 
 
 def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                             options):
+    # 1. calculate output data
+    out_data = []
+    last_frame_time_relative = None
+    last_frame_time_epoch = None
+    cum_bits = 0
+    rtp_seq_list = []
+    for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
+        if last_frame_time_relative is None:
+            last_frame_time_relative = pkt['frame_time_relative']
+            last_frame_time_epoch = pkt['frame_time_epoch']
+        if pkt['frame_time_relative'] > (last_frame_time_relative +
+                                         options.period_sec):
+            out_data.append([last_frame_time_relative,
+                             last_frame_time_epoch,
+                             cum_bits,
+                             rtp_seq_list])
+            cum_bits = 0
+            rtp_seq_list = []
+            # insert zeroes where no data is present
+            delta_time = pkt['frame_time_relative'] - last_frame_time_relative
+            zero_elements = int((delta_time - options.period_sec) /
+                                options.period_sec)
+            for i in range(zero_elements):
+                time_delta = (i + 1) * options.period_sec
+                out_data.append([last_frame_time_relative + time_delta,
+                                 last_frame_time_epoch + time_delta,
+                                 0,
+                                 []])
+
+            last_frame_time_relative = pkt['frame_time_relative']
+            last_frame_time_epoch = pkt['frame_time_epoch']
+        # account for current packet
+        cum_bits += pkt['ip_len'] * 8
+        rtp_seq_list.append(pkt['rtp_seq'])
+    # flush data
+    out_data.append([last_frame_time_relative,
+                     last_frame_time_epoch,
+                     cum_bits,
+                     rtp_seq_list])
+
+    # 2. dump output data
     output_file = '%s.network.bitrate.ip_src_%s.rtp_ssrc_%s.csv' % (
         prefix, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        delta_list = []
-        last_frame_time_relative = None
-        last_frame_time_epoch = None
-        cum_bits = 0
-        rtp_seq_list = []
-        for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
-            if last_frame_time_relative is None:
-                last_frame_time_relative = pkt['frame_time_relative']
-                last_frame_time_epoch = pkt['frame_time_epoch']
-            if pkt['frame_time_relative'] > (last_frame_time_relative +
-                                             options.period_sec):
-                delta_list.append([last_frame_time_relative,
-                                   last_frame_time_epoch,
-                                   cum_bits,
-                                   rtp_seq_list])
-                cum_bits = 0
-                rtp_seq_list = []
-                # insert zeroes where no data is present
-                delta = pkt['frame_time_relative'] - last_frame_time_relative
-                zero_elements = int((delta - options.period_sec) /
-                                    options.period_sec)
-                for i in range(zero_elements):
-                    time_delta = (i + 1) * options.period_sec
-                    delta_list.append([last_frame_time_relative + time_delta,
-                                       last_frame_time_epoch + time_delta,
-                                       0,
-                                       []])
-
-                last_frame_time_relative = pkt['frame_time_relative']
-                last_frame_time_epoch = pkt['frame_time_epoch']
-            # account for current packet
-            cum_bits += pkt['ip_len'] * 8
-            rtp_seq_list.append(pkt['rtp_seq'])
-        # flush data
-        delta_list.append([last_frame_time_relative,
-                           last_frame_time_epoch,
-                           cum_bits,
-                           rtp_seq_list])
         f.write('# %s,%s,%s,%s\n' % (
             'frame_time_relative', 'frame_time_epoch',
             'bitrate_last_interval', 'rtp_seq_list'))
         for (frame_time_relative, frame_time_epoch, bits,
-                rtp_seq_list) in delta_list:
+                rtp_seq_list) in out_data:
             f.write('%f,%f,%i,%s\n' % (
                 frame_time_relative, frame_time_epoch,
                 int(bits / options.period_sec),
