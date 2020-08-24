@@ -13,6 +13,7 @@ import sys
 default_values = {
     'debug': 0,
     'dry_run': False,
+    'connections': 1,
     'analysis_type': 'all',
     'period_sec': 1.0,
     'filter': None,
@@ -70,14 +71,15 @@ def parse_file(infile, options):
     if options.debug > 2:
         for d in udp_connections:
             print(d)
-    conn = udp_connections[0]
-    if options.debug > 0:
-        print('main_conn {{ left: {laddr}:{lport} right: {raddr}:{rport} '
-              'proto: {proto} bytes: {tbytes} packets: {tpkts} }}'.format(
-                  **conn))
-    # process connection
-    prefix = '%s.%s' % (infile, 'conn')
-    process_connection(infile, udp_connections, conn, prefix, options)
+    for i in range(options.connections):
+        conn = udp_connections[i]
+        if options.debug > 0:
+            print('connection {{ left: {laddr}:{lport} '
+                   'right: {raddr}:{rport} proto: {proto} bytes: {tbytes} '
+                   'packets: {tpkts} }}'.format(**conn))
+        # process connection
+        prefix = '%s.%s' % (infile, 'conn')
+        process_connection(infile, conn, prefix, options)
 
 
 def tshark_error_check(returncode, out, err, command):
@@ -146,7 +148,7 @@ def get_rtp_p_type_list(parsed_rtp_list):
 
 
 # process a single connection
-def process_connection(infile, udp_connections, conn, prefix, options):
+def process_connection(infile, conn, prefix, options):
     # create filter for full connection
     conn_filter = ('{proto}.addr=={laddr} && udp.port=={lport} && '
                    '{proto}.addr=={raddr} && udp.port=={rport}'.format(**conn))
@@ -780,6 +782,11 @@ def get_options(argv):
     parser.add_argument('-D', '--dry-run', action='store_true',
                         dest='dry_run', default=default_values['dry_run'],
                         help='Dry run',)
+    parser.add_argument('-c', '--connections', action='store', type=int,
+                        dest='connections',
+                        default=default_values['connections'],
+                        metavar='CONNECTIONS',
+                        help='number of connections',)
     parser.add_argument('--period-sec', action='store', type=float,
                         dest='period_sec',
                         default=default_values['period_sec'],
