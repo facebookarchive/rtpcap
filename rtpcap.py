@@ -138,7 +138,8 @@ def get_rtp_p_type_list(parsed_rtp_list):
 # process a single connection
 def process_connection(infile, udp_connections, conn, prefix, options):
     # create filter for full connection
-    conn_filter = '{proto}.addr=={laddr} && udp.port=={lport} && {proto}.addr=={raddr} && udp.port=={rport}'.format(**conn)
+    conn_filter = ('{proto}.addr=={laddr} && udp.port=={lport} && '
+                   '{proto}.addr=={raddr} && udp.port=={rport}'.format(**conn))
     if options.filter is not None:
         conn_filter += ' && ' + options.filter
 
@@ -151,14 +152,20 @@ def process_connection(infile, udp_connections, conn, prefix, options):
             for rtp_ssrc in parsed_rtp_list[ip_src].keys():
                 ip_len = sum(d['ip_len'] for d in
                              parsed_rtp_list[ip_src][rtp_ssrc])
+                duration = (parsed_rtp_list[ip_src][rtp_ssrc][-1]
+                            ['frame_time_epoch'] -
+                            parsed_rtp_list[ip_src][rtp_ssrc][0]
+                            ['frame_time_epoch'])
                 pkts = len(parsed_rtp_list[ip_src][rtp_ssrc])
-                rtp_p_type_list = get_rtp_p_type_list(parsed_rtp_list[ip_src][rtp_ssrc])
+                rtp_p_type_list = get_rtp_p_type_list(
+                    parsed_rtp_list[ip_src][rtp_ssrc])
                 print('ip_src: %s rtp_ssrc: %s rtp_p_type_list: %s '
-                      'ip_len: %i pkts: %i' % (
-                          ip_src, rtp_ssrc, rtp_p_type_list, ip_len, pkts))
+                      'ip_len: %i pkts: %i duration: %f' % (
+                          ip_src, rtp_ssrc, rtp_p_type_list, ip_len, pkts,
+                          duration))
 
-    ## analyze connections
-    #if options.analysis_type == 'video':
+    # analyze connections
+    # if options.analysis_type == 'video':
     #    rtp_pkt_list = analyze_rtp_data(conn_file, conn['laddr'],
     #                                    conn['lport'], conn['proto'], options)
     #    # process RTP traffic
@@ -166,7 +173,8 @@ def process_connection(infile, udp_connections, conn, prefix, options):
     #    p_type_dict = classify_rtp_payload_types(rtp_pkt_list)
     #    video_rtp_p_type = get_video_rtp_p_type(p_type_dict, saddr, options)
     #    # parse video stream
-    #    lvideo_statistics = analyze_video_stream(rtp_pkt_list, video_rtp_p_type,
+    #    lvideo_statistics = analyze_video_stream(rtp_pkt_list,
+    #                                             video_rtp_p_type,
     #                                             options)
     #    dump_video_statistics(lvideo_statistics, conn['laddr'], conn_file)
 
@@ -178,7 +186,8 @@ def process_connection(infile, udp_connections, conn, prefix, options):
     #    video_rtp_p_type = get_video_rtp_p_type(p_type_dict, saddr, options)
 
     #    # parse video stream
-    #    rvideo_statistics = analyze_video_stream(rtp_pkt_list, video_rtp_p_type,
+    #    rvideo_statistics = analyze_video_stream(rtp_pkt_list,
+    #                                             video_rtp_p_type,
     #                                             options)
     #    dump_video_statistics(rvideo_statistics, conn['raddr'], conn_file)
 
@@ -250,7 +259,8 @@ def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
             f.write('%f,%i,%s\n' % (frame_time_relative, delta, dup))
 
 
-def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
+def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
+                            options):
     output_file = '%s.network.bitrate.ip_src_%s.rtp_ssrc_%s.csv' % (
         prefix, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
@@ -421,8 +431,11 @@ def classify_rtp_payload_types(rtp_pkt_list):
 def parse_rtp_data(out, options):
     parsed_rtp_list = {}
     parsed_rtcp_list = {}
-    # example (rtp): '2\t1584723835.328870000\t0.0\t2a03:2880:f231:cd:face:b00c:0:6443\t1135\t98\t\t0xd7346929\t27012\t1122654371\t0'
-    # example (rtcp): '3\t1584373728.001695000\t0.00001\t2601:647:4300:f039:e97a:e051:b8a8:a4da\t\t205'
+    # example (rtp): '2\t1584723835.328870000\t0.0\t'
+    #                '2a03:2880:f231:cd:face:b00c:0:6443\t1135\t98\t\t'
+    #                '0xd7346929\t27012\t1122654371\t0'
+    # example (rtcp): '3\t1584373728.001695000\t0.00001\t''
+    #                 '2601:647:4300:f039:e97a:e051:b8a8:a4da\t\t205'
     pkt_pattern = (
         r'(?P<frame_number>\d+)\t'
         r'(?P<frame_time_epoch>[\d\.]+)\t'
