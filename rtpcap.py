@@ -25,7 +25,6 @@ IPV6_PATTERN = r'[a-fA-F\d:]+'
 IP_PATTERN = r'[a-fA-F\d:\.]+'
 
 ANALYSIS_TYPES = {
-    'video',
     'audio-jitter',
     'audio-ploss',
     'network-bitrate',
@@ -570,29 +569,22 @@ def get_options(argv):
     parser.add_argument('-D', '--dry-run', action='store_true',
                         dest='dry_run', default=default_values['dry_run'],
                         help='Dry run',)
+    parser.add_argument('--period-sec', action='store', type=float,
+                        dest='period_sec',
+                        default=default_values['period_sec'],
+                        metavar='PERIOD_SEC',
+                        help='period in seconds',)
     parser.add_argument('-a', '--analysis', action='store', type=str,
                         dest='analysis_type',
                         default=default_values['analysis_type'],
                         choices=ANALYSIS_TYPES,
                         metavar='ANALYSIS_TYPE',
                         help='analysis type %r' % ANALYSIS_TYPES,)
-    parser.add_argument('--period-sec', action='store', type=float,
-                        dest='period_sec',
-                        default=default_values['period_sec'],
-                        metavar='PERIOD_SEC',
-                        help='period in seconds',)
-    parser.add_argument('--audio-jitter', action='store_const',
-                        dest='analysis_type', const='audio-jitter',
-                        metavar='ANALYSIS_TYPE',
-                        help='analysis type: audio-jitter',)
-    parser.add_argument('--audio-ploss', action='store_const',
-                        dest='analysis_type', const='audio-ploss',
-                        metavar='ANALYSIS_TYPE',
-                        help='analysis type: audio-ploss',)
-    parser.add_argument('--network-bitrate', action='store_const',
-                        dest='analysis_type', const='network-bitrate',
-                        metavar='ANALYSIS_TYPE',
-                        help='analysis type: network-bitrate',)
+    for analysis in ANALYSIS_TYPES:
+        parser.add_argument('--%s' % analysis, action='store_const',
+                            dest='analysis_type', const=analysis,
+                            metavar='ANALYSIS_TYPE',
+                            help='analysis type: %s' % analysis,)
     parser.add_argument('--filter', action='store', type=str,
                         dest='filter',
                         default=default_values['filter'],
