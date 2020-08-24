@@ -347,6 +347,18 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                 ':'.join([str(i) for i in rtp_seq_list])))
 
 
+# video-pacing measures per-frame latency, defined as "time between the
+# first packet of each frame, and the last packet of the same frame *that
+# arrives before the first packet of the next frame*. This means that,
+# if packets from frame `A` arrive at times `A1..An`, followed by packets
+# from frame `B` arriving at times `B1..Bn`, and
+# `A1 < A2 < ... < Aj < B1 < Aj+1 < An`, then video-pacing is measuring
+# `Aj - A1`. This is similar (but not exactly the same) than "time
+# between the first and last packets of a frame", which is what we really
+# want to measure. This would be `An - A1`. This slightly-modified
+# definition makes the implementation much easier, and should not make
+# much of a difference, as packets are always sent in order (i.e.
+# `An < B1` at the sender).
 def analyze_video_pacing(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
     # 1. calculate output data
     out_data = []
