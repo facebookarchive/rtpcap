@@ -172,8 +172,8 @@ def analyze_rtp_data(infile, saddr, sport, proto, options):
     command = ('tshark -r %s -d udp.port==%s,rtp '
                '-n -T fields -e frame.number -e frame.time_epoch '
                '-e %s -e %s '
-               '-e rtp.p_type -e rtcp.pt -e rtp.seq -e rtp.timestamp '
-               '-e rtp.marker' % (
+               '-e rtp.p_type -e rtcp.pt -e rtp.ssrc -e rtp.seq '
+               '-e rtp.timestamp -e rtp.marker' % (
                    infile, sport, ipsrc_field, iplen_field))
     returncode, out, err = run(command, options)
     if returncode != 0:
@@ -313,7 +313,7 @@ def parse_rtp_data(out, saddr, options):
         'rtp': [],
         'rtcp': [],
     }
-    # example (rtp): '1\t1584373727.996807000\t2601:647:4300:f039:e97a:e051:b8a8:a4da\t103\t\t2303\t1266375689\t0'
+    # example (rtp): '2\t1584723835.328870000\t2a03:2880:f231:cd:face:b00c:0:6443\t1135\t98\t\t0xd7346929\t27012\t1122654371\t0'
     # example (rtcp): '3\t1584373728.001695000\t2601:647:4300:f039:e97a:e051:b8a8:a4da\t\t205'
     pkt_pattern = (
         r'(?P<frame_number>\d+)\t'
@@ -322,6 +322,7 @@ def parse_rtp_data(out, saddr, options):
         r'(?P<iplen>\d+)\t'
         r'(?P<rtp_p_type>\d*)\t'  # optional
         r'(?P<rtcp_pt>\d*)\t*'  # optional
+        r'(?P<rtp_ssrc>0x[\da-fA-F]*)\t*'  # optional
         r'(?P<rtp_seq>\d*)\t*'  # optional
         r'(?P<rtp_timestamp>\d*)\t*'  # optional
         r'(?P<rtp_marker>\d*)'  # optional
@@ -347,12 +348,14 @@ def parse_rtp_data(out, saddr, options):
         if protocol == 'rtp':
             entry['rtp_p_type'] = int(entry['rtp_p_type'])
             del entry['rtcp_pt']
+            entry['rtp_ssrc'] = int(entry['rtp_ssrc'], 16)
             entry['rtp_seq'] = int(entry['rtp_seq'])
             entry['rtp_timestamp'] = int(entry['rtp_timestamp'])
             entry['rtp_marker'] = int(entry['rtp_marker'])
         elif protocol == 'rtcp':
             del entry['rtp_p_type']
             entry['rtcp_pt'] = int(entry['rtcp_pt'])
+            del entry['rtp_ssrc']
             del entry['rtp_seq']
             del entry['rtp_timestamp']
             del entry['rtp_marker']
