@@ -128,6 +128,11 @@ def parse_udp_connections(out, options):
     return udp_connections
 
 
+def get_rtp_p_type_list(parsed_rtp_list):
+    rtp_p_type_list = list({pkt['rtp_p_type'] for pkt in parsed_rtp_list})
+    return rtp_p_type_list
+
+
 # process a single connection
 def process_connection(infile, udp_connections, conn, prefix, options):
     # create filter for full connection
@@ -142,13 +147,13 @@ def process_connection(infile, udp_connections, conn, prefix, options):
     if options.debug > 0:
         for ip_src in parsed_rtp_list.keys():
             for rtp_ssrc in parsed_rtp_list[ip_src].keys():
-                for rtp_p_type in parsed_rtp_list[ip_src][rtp_ssrc].keys():
-                    ip_len = sum(d['ip_len'] for d in
-                                 parsed_rtp_list[ip_src][rtp_ssrc][rtp_p_type])
-                    pkts = len(parsed_rtp_list[ip_src][rtp_ssrc][rtp_p_type])
-                    print('ip_src: %s rtp_ssrc: %s rtp_p_type: %i '
-                          'ip_len: %i pkts: %i' % (
-                              ip_src, rtp_ssrc, rtp_p_type, ip_len, pkts))
+                ip_len = sum(d['ip_len'] for d in
+                             parsed_rtp_list[ip_src][rtp_ssrc])
+                pkts = len(parsed_rtp_list[ip_src][rtp_ssrc])
+                rtp_p_type_list = get_rtp_p_type_list(parsed_rtp_list[ip_src][rtp_ssrc])
+                print('ip_src: %s rtp_ssrc: %s rtp_p_type_list: %s '
+                      'ip_len: %i pkts: %i' % (
+                          ip_src, rtp_ssrc, rtp_p_type_list, ip_len, pkts))
 
     ## analyze connections
     #if options.analysis_type == 'video':
@@ -177,23 +182,21 @@ def process_connection(infile, udp_connections, conn, prefix, options):
 
     for ip_src in parsed_rtp_list.keys():
         for rtp_ssrc in parsed_rtp_list[ip_src].keys():
-            for rtp_p_type in parsed_rtp_list[ip_src][rtp_ssrc].keys():
-                if options.analysis_type == 'audio-jitter':
-                    analyze_audio_jitter(infile, parsed_rtp_list, ip_src,
-                                         rtp_ssrc, rtp_p_type, options)
-                elif options.analysis_type == 'audio-ploss':
-                    analyze_audio_ploss(infile, parsed_rtp_list, ip_src,
-                                        rtp_ssrc, rtp_p_type, options)
+            if options.analysis_type == 'audio-jitter':
+                analyze_audio_jitter(infile, parsed_rtp_list, ip_src,
+                                     rtp_ssrc, options)
+            elif options.analysis_type == 'audio-ploss':
+                analyze_audio_ploss(infile, parsed_rtp_list, ip_src,
+                                    rtp_ssrc, options)
 
 
-def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, rtp_p_type,
-                         options):
-    output_file = '%s.audio.jitter.ip_src_%s.rtp_ssrc_%s.rtp_p_type_%i.csv' % (
-        prefix, ip_src, rtp_ssrc, rtp_p_type)
+def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
+    output_file = '%s.audio.jitter.ip_src_%s.rtp_ssrc_%s.csv' % (
+        prefix, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
         delta_list = []
         last_frame_time_relative = None
-        for pkt in parsed_rtp_list[ip_src][rtp_ssrc][rtp_p_type]:
+        for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
             if last_frame_time_relative is not None:
                 delta = pkt['frame_time_relative'] - last_frame_time_relative
                 delta_list.append([pkt['frame_time_relative'], delta])
@@ -213,14 +216,13 @@ def rtp_ploss_diff(a, b):
     return mod
 
 
-def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, rtp_p_type,
-                         options):
-    output_file = '%s.audio.ploss.ip_src_%s.rtp_ssrc_%s.rtp_p_type_%i.csv' % (
-        prefix, ip_src, rtp_ssrc, rtp_p_type)
+def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
+    output_file = '%s.audio.ploss.ip_src_%s.rtp_ssrc_%s.csv' % (
+        prefix, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
         delta_list = []
         last_rtp_seq = -1
-        for pkt in parsed_rtp_list[ip_src][rtp_ssrc][rtp_p_type]:
+        for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
             if last_rtp_seq != -1:
                 delta = rtp_ploss_diff(pkt['rtp_seq'], last_rtp_seq)
                 delta_list.append([pkt['frame_time_relative'], delta])
@@ -416,7 +418,6 @@ def parse_rtp_data(out, options):
         entry['ip_len'] = int(entry['ip_len'])
         if protocol == 'rtp':
             entry['rtp_p_type'] = int(entry['rtp_p_type'])
-            rtp_p_type = entry['rtp_p_type']
             del entry['rtcp_pt']
             entry['rtp_ssrc'] = int(entry['rtp_ssrc'], 16)
             rtp_ssrc = '%08x' % entry['rtp_ssrc']
@@ -426,10 +427,8 @@ def parse_rtp_data(out, options):
             if ip_src not in parsed_rtp_list:
                 parsed_rtp_list[ip_src] = {}
             if rtp_ssrc not in parsed_rtp_list[ip_src]:
-                parsed_rtp_list[ip_src][rtp_ssrc] = {}
-            if rtp_p_type not in parsed_rtp_list[ip_src][rtp_ssrc]:
-                parsed_rtp_list[ip_src][rtp_ssrc][rtp_p_type] = []
-            parsed_rtp_list[ip_src][rtp_ssrc][rtp_p_type].append(entry)
+                parsed_rtp_list[ip_src][rtp_ssrc] = []
+            parsed_rtp_list[ip_src][rtp_ssrc].append(entry)
         elif protocol == 'rtcp':
             del entry['rtp_p_type']
             entry['rtcp_pt'] = int(entry['rtcp_pt'])
