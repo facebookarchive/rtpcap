@@ -266,17 +266,22 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
     with open(output_file, 'w') as f:
         delta_list = []
         last_frame_time_relative = None
-        last_bits = 0
+        cum_bits = 0
         for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
             if last_frame_time_relative is None:
                 last_frame_time_relative = pkt['frame_time_relative']
             if pkt['frame_time_relative'] > (last_frame_time_relative + 1.0):
-                delta_list.append([pkt['frame_time_relative'], last_bits])
-                last_bits = 0
+                delta_list.append([pkt['frame_time_relative'],
+                                   pkt['frame_time_epoch'],
+                                   cum_bits])
+                cum_bits = 0
                 last_frame_time_relative = pkt['frame_time_relative']
-            last_bits += pkt['ip_len'] * 8
-        for frame_time_relative, delta in delta_list:
-            f.write('%f,%i\n' % (frame_time_relative, delta))
+            cum_bits += pkt['ip_len'] * 8
+        f.write('# %s,%s,%s\n' % ('frame_time_relative', 'frame_time_epoch',
+                                  'bits_last_interval'))
+        for frame_time_relative, frame_time_epoch, bits in delta_list:
+            f.write('%f,%f,%i\n' % (frame_time_relative, frame_time_epoch,
+                                    bits))
 
 
 def get_video_rtp_p_type(p_type_dict, saddr, options):
