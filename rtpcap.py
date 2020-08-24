@@ -28,6 +28,7 @@ ANALYSIS_TYPES = {
     'audio-jitter',
     'audio-ploss',
     'network-bitrate',
+    'video-pacing',
     'all',
 }
 
@@ -210,6 +211,9 @@ def process_connection(infile, udp_connections, conn, prefix, options):
             elif options.analysis_type == 'network-bitrate':
                 analyze_network_bitrate(infile, parsed_rtp_list, ip_src,
                                         rtp_ssrc, options)
+            elif options.analysis_type == 'video-pacing':
+                analyze_video_pacing(infile, parsed_rtp_list, ip_src,
+                                     rtp_ssrc, options)
 
 
 def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
@@ -341,6 +345,78 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                 frame_time_relative, frame_time_epoch,
                 int(bits / options.period_sec),
                 ':'.join([str(i) for i in rtp_seq_list])))
+
+
+def analyze_video_pacing(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
+    # 1. calculate output data
+    out_data = []
+    rtp_timestamp = None
+    frame_time_epoch = None
+    last_frame_time_epoch = None
+    cum_bits = 0
+    cum_pkts = 0
+    frame_video_type = 'P'
+    for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
+        # first packet
+        if rtp_timestamp is None or frame_time_epoch is None:
+            rtp_timestamp = pkt['rtp_timestamp']
+            frame_time_epoch = pkt['frame_time_epoch']
+            last_frame_time_epoch = pkt['frame_time_epoch']
+            cum_bits = 0
+            cum_pkts = 0
+            frame_video_type = 'P'
+        # check output
+        if pkt['rtp_timestamp'] < rtp_timestamp:
+            # old packet: ignore it
+            continue
+        elif pkt['rtp_timestamp'] > rtp_timestamp:
+            # new frame: process data from old frame
+            latency = last_frame_time_epoch - frame_time_epoch
+            out_data.append([frame_time_epoch,
+                             cum_pkts,
+                             cum_bits,
+                             frame_video_type,
+                             latency])
+            rtp_timestamp = pkt['rtp_timestamp']
+            frame_time_epoch = pkt['frame_time_epoch']
+            last_frame_time_epoch = pkt['frame_time_epoch']
+            cum_bits = 0
+            cum_pkts = 0
+            frame_video_type = 'P'
+        else:
+            # check current frame video type may be i-frame
+            if (cum_pkts == 1 and
+                    cum_bits < (200 * 8) and
+                    (pkt['ip_len'] * 8) > (1000 * 8)):
+                # an i-frame is typically composed of a config frame
+                # (containing VPS/SPS/PPS in h265, SPS/PPS in h264),
+                # which is small (~150 bytes in h265, less in h264),
+                # followed by a series of large packets (>1000 bytes)
+                frame_video_type = 'I'
+        # account for current packet
+        cum_pkts += 1
+        cum_bits += pkt['ip_len'] * 8
+        last_frame_time_epoch = pkt['frame_time_epoch']
+
+    # flush data
+    out_data.append([frame_time_epoch,
+                     cum_pkts,
+                     cum_bits,
+                     frame_video_type,
+                     latency])
+
+    # 2. dump output data
+    output_file = '%s.video.pacing.ip_src_%s.rtp_ssrc_%s.csv' % (
+        prefix, ip_src, rtp_ssrc)
+    with open(output_file, 'w') as f:
+        f.write('# %s,%s,%s,%s,%s\n' % (
+            'frame_time_epoch', 'packets', 'bits', 'frame_video_type',
+            'latency'))
+        for (frame_time_epoch, cum_pkts, cum_bits, frame_video_type,
+                latency) in out_data:
+            f.write('%f,%i,%i,%s,%f\n' % (
+                frame_time_epoch, cum_pkts, cum_bits, frame_video_type,
+                latency))
 
 
 def get_video_rtp_p_type(p_type_dict, saddr, options):
