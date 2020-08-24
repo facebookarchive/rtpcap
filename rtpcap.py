@@ -72,7 +72,7 @@ def analyze_udp_connections(infile, options):
 
 
 def get_addr_proto(addr):
-    ipv4_pattern = r'^\d\.\d\.\d\.\d'
+    ipv4_pattern = r'^\d+\.\d+\.\d+\.\d+:?'
     ipv6_pattern = r'^[a-fA-F\d:]+'
     if re.search(ipv4_pattern, addr):
         return 'ip'
