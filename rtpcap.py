@@ -28,6 +28,7 @@ ANALYSIS_TYPES = {
     'audio-jitter',
     'audio-ploss',
     'network-bitrate',
+    'video-basic',
     'video-pacing',
     'all',
 }
@@ -211,14 +212,16 @@ def process_connection(infile, udp_connections, conn, prefix, options):
             elif options.analysis_type == 'network-bitrate':
                 analyze_network_bitrate(infile, parsed_rtp_list, ip_src,
                                         rtp_ssrc, options)
+            elif options.analysis_type == 'video-basic':
+                analyze_video_basic(infile, parsed_rtp_list, ip_src,
+                                    rtp_ssrc, options)
             elif options.analysis_type == 'video-pacing':
                 analyze_video_pacing(infile, parsed_rtp_list, ip_src,
                                      rtp_ssrc, options)
 
 
 def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
-    output_file = '%s.audio.jitter.ip_src_%s.rtp_ssrc_%s.csv' % (
-        prefix, ip_src, rtp_ssrc)
+    mode = 'audio.jitter'
     # 1. calculate output data
     out_data = []
     last_frame_time_relative = None
@@ -236,6 +239,8 @@ def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
     total_delta = sum(delta_time for _, _, delta_time, _ in out_data)
     samples = len(out_data)
     average_delta = total_delta / samples
+    output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
+        prefix, mode, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
         f.write('# %s,%s,%s,%s,%s\n' % ('frame_time_epoch',
                                         'frame_time_relative',
@@ -260,6 +265,7 @@ def rtp_ploss_diff(a, b):
 
 
 def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
+    mode = 'audio.ploss'
     # 1. calculate output data
     out_data = []
     last_rtp_seq = -1
@@ -289,8 +295,8 @@ def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
             last_rtp_seq = pkt['rtp_seq']
 
     # 2. dump data
-    output_file = '%s.audio.ploss.ip_src_%s.rtp_ssrc_%s.csv' % (
-        prefix, ip_src, rtp_ssrc)
+    output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
+        prefix, mode, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
         f.write('# %s,%s,%s,%s\n' % ('frame_time_epoch', 'frame_time_relative',
                                      'delta_rtp_seq', 'dup'))
@@ -301,6 +307,7 @@ def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
 
 def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                             options):
+    mode = 'network.bitrate'
     # 1. calculate output data
     out_data = []
     last_frame_time_relative = None
@@ -342,8 +349,8 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                      rtp_seq_list])
 
     # 2. dump output data
-    output_file = '%s.network.bitrate.ip_src_%s.rtp_ssrc_%s.csv' % (
-        prefix, ip_src, rtp_ssrc)
+    output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
+        prefix, mode, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
         f.write('# %s,%s,%s,%s\n' % (
             'frame_time_relative', 'frame_time_epoch',
@@ -354,6 +361,77 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                 frame_time_relative, frame_time_epoch,
                 int(bits / options.period_sec),
                 ':'.join([str(i) for i in rtp_seq_list])))
+
+
+def analyze_video_basic(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
+                        options):
+    mode = 'video.basic'
+    # 1. calculate output data
+    out_data = []
+    last_frame_time_relative = None
+    last_frame_time_epoch = None
+    cum_frames = 0
+    cum_pkts = 0
+    cum_bits = 0
+    last_rtp_timestamp = None
+    for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
+        if last_frame_time_relative is None:
+            last_frame_time_relative = pkt['frame_time_relative']
+            last_frame_time_epoch = pkt['frame_time_epoch']
+            last_rtp_timestamp = pkt['rtp_timestamp']
+        if pkt['frame_time_relative'] > (last_frame_time_relative +
+                                         options.period_sec):
+            out_data.append([last_frame_time_relative,
+                             last_frame_time_epoch,
+                             cum_frames,
+                             cum_pkts,
+                             cum_bits])
+            cum_frames = 0
+            cum_pkts = 0
+            cum_bits = 0
+            # insert zeroes where no data is present
+            delta_time = pkt['frame_time_relative'] - last_frame_time_relative
+            zero_elements = int((delta_time - options.period_sec) /
+                                options.period_sec)
+            for i in range(zero_elements):
+                time_delta = (i + 1) * options.period_sec
+                out_data.append([last_frame_time_relative + time_delta,
+                                 last_frame_time_epoch + time_delta,
+                                 0,
+                                 0,
+                                 0])
+
+            last_frame_time_relative = pkt['frame_time_relative']
+            last_frame_time_epoch = pkt['frame_time_epoch']
+        # account for current packet
+        if pkt['rtp_timestamp'] > last_rtp_timestamp:
+            # new frame
+            cum_frames += 1
+            last_rtp_timestamp = pkt['rtp_timestamp']
+        cum_pkts += 1
+        cum_bits += pkt['ip_len'] * 8
+    # flush data
+    out_data.append([last_frame_time_relative,
+                     last_frame_time_epoch,
+                     cum_frames,
+                     cum_pkts,
+                     cum_bits])
+
+    # 2. dump output data
+    output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
+        prefix, mode, ip_src, rtp_ssrc)
+    with open(output_file, 'w') as f:
+        f.write('# %s,%s,%s,%s,%s\n' % (
+            'frame_time_relative', 'frame_time_epoch',
+            'framerate_last_interval', 'packetrate_last_interval',
+            'bitrate_last_interval'))
+        for (frame_time_relative, frame_time_epoch, frames, pkts,
+                bits) in out_data:
+            f.write('%f,%f,%i,%i,%i\n' % (
+                frame_time_relative, frame_time_epoch,
+                int(frames / options.period_sec),
+                int(pkts / options.period_sec),
+                int(bits / options.period_sec)))
 
 
 # video-pacing measures per-frame latency, defined as "time between the
@@ -369,6 +447,7 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
 # much of a difference, as packets are always sent in order (i.e.
 # `An < B1` at the sender).
 def analyze_video_pacing(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
+    mode = 'video.pacing'
     # 1. calculate output data
     out_data = []
     rtp_timestamp = None
@@ -427,8 +506,8 @@ def analyze_video_pacing(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
                      latency])
 
     # 2. dump output data
-    output_file = '%s.video.pacing.ip_src_%s.rtp_ssrc_%s.csv' % (
-        prefix, ip_src, rtp_ssrc)
+    output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
+        prefix, mode, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
         f.write('# %s,%s,%s,%s,%s\n' % (
             'frame_time_epoch', 'packets', 'bits', 'frame_video_type',
