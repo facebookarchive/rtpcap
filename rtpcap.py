@@ -215,18 +215,16 @@ def process_connection(infile, conn, prefix, options):
             # 1. calculate output data
             if options.analysis_type == 'network-time':
                 out_data = analyze_network_time(
-                    infile, parsed_rtp_list, ip_src, rtp_ssrc,
-                    options.period_sec)
+                    parsed_rtp_list, ip_src, rtp_ssrc, options.period_sec)
             elif options.analysis_type == 'audio-packet':
                 out_data = analyze_audio_packet(
-                    infile, parsed_rtp_list, ip_src, rtp_ssrc)
+                    parsed_rtp_list, ip_src, rtp_ssrc)
             elif options.analysis_type == 'video-time':
                 out_data = analyze_video_time(
-                    infile, parsed_rtp_list, ip_src, rtp_ssrc,
-                    options.period_sec)
+                    parsed_rtp_list, ip_src, rtp_ssrc, options.period_sec)
             elif options.analysis_type == 'video-frame':
                 out_data = analyze_video_frame(
-                    infile, parsed_rtp_list, ip_src, rtp_ssrc)
+                    parsed_rtp_list, ip_src, rtp_ssrc)
             # 2. dump data
             output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
                 infile, options.analysis_type, ip_src, rtp_ssrc)
@@ -245,7 +243,7 @@ OUTPUT_HEADERS['audio-packet'] = (
 )
 
 
-def analyze_audio_packet(prefix, parsed_rtp_list, ip_src, rtp_ssrc):
+def analyze_audio_packet(parsed_rtp_list, ip_src, rtp_ssrc):
     # initialization
     out_data = []
     last_frame_time_relative = None
@@ -377,7 +375,7 @@ OUTPUT_HEADERS['network-time'] = (
 )
 
 
-def analyze_network_time(prefix, parsed_rtp_list, ip_src, rtp_ssrc, period_sec):
+def analyze_network_time(parsed_rtp_list, ip_src, rtp_ssrc, period_sec):
     # initialization
     out_data = []
     last_frame_time_relative = None
@@ -461,7 +459,7 @@ OUTPUT_HEADERS['video-time'] = (
 )
 
 
-def analyze_video_time(prefix, parsed_rtp_list, ip_src, rtp_ssrc, period_sec):
+def analyze_video_time(parsed_rtp_list, ip_src, rtp_ssrc, period_sec):
     # initialization
     out_data = []
     last_frame_time_relative = None
@@ -544,7 +542,7 @@ OUTPUT_HEADERS['video-frame'] = (
 # at the sender).
 # (2) inter-frame latency, measured as the time between the first packets
 # of 2 consecutive frames.
-def analyze_video_frame(prefix, parsed_rtp_list, ip_src, rtp_ssrc):
+def analyze_video_frame(parsed_rtp_list, ip_src, rtp_ssrc):
     # initialization
     out_data = []
     rtp_timestamp = None
