@@ -14,6 +14,7 @@ default_values = {
     'debug': 0,
     'dry_run': False,
     'analysis_type': 'all',
+    'period_sec': 1.0,
     'filter': None,
     'infile': None,
 }
@@ -266,22 +267,51 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
     with open(output_file, 'w') as f:
         delta_list = []
         last_frame_time_relative = None
+        last_frame_time_epoch = None
         cum_bits = 0
+        rtp_seq_list = []
         for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
             if last_frame_time_relative is None:
                 last_frame_time_relative = pkt['frame_time_relative']
-            if pkt['frame_time_relative'] > (last_frame_time_relative + 1.0):
-                delta_list.append([pkt['frame_time_relative'],
-                                   pkt['frame_time_epoch'],
-                                   cum_bits])
+                last_frame_time_epoch = pkt['frame_time_epoch']
+            if pkt['frame_time_relative'] > (last_frame_time_relative +
+                                             options.period_sec):
+                delta_list.append([last_frame_time_relative,
+                                   last_frame_time_epoch,
+                                   cum_bits,
+                                   rtp_seq_list])
                 cum_bits = 0
+                rtp_seq_list = []
+                # insert zeroes where no data is present
+                delta = pkt['frame_time_relative'] - last_frame_time_relative
+                zero_elements = int((delta - options.period_sec) /
+                                    options.period_sec)
+                for i in range(zero_elements):
+                    time_delta = (i + 1) * options.period_sec
+                    delta_list.append([last_frame_time_relative + time_delta,
+                                       last_frame_time_epoch + time_delta,
+                                       0,
+                                       []])
+
                 last_frame_time_relative = pkt['frame_time_relative']
+                last_frame_time_epoch = pkt['frame_time_epoch']
+            # account for current packet
             cum_bits += pkt['ip_len'] * 8
-        f.write('# %s,%s,%s\n' % ('frame_time_relative', 'frame_time_epoch',
-                                  'bits_last_interval'))
-        for frame_time_relative, frame_time_epoch, bits in delta_list:
-            f.write('%f,%f,%i\n' % (frame_time_relative, frame_time_epoch,
-                                    bits))
+            rtp_seq_list.append(pkt['rtp_seq'])
+        # flush data
+        delta_list.append([last_frame_time_relative,
+                           last_frame_time_epoch,
+                           cum_bits,
+                           rtp_seq_list])
+        f.write('# %s,%s,%s,%s\n' % (
+            'frame_time_relative', 'frame_time_epoch',
+            'bitrate_last_interval', 'rtp_seq_list'))
+        for (frame_time_relative, frame_time_epoch, bits,
+                rtp_seq_list) in delta_list:
+            f.write('%f,%f,%i,%s\n' % (
+                frame_time_relative, frame_time_epoch,
+                int(bits / options.period_sec),
+                ':'.join([str(i) for i in rtp_seq_list])))
 
 
 def get_video_rtp_p_type(p_type_dict, saddr, options):
@@ -524,6 +554,11 @@ def get_options(argv):
                         choices=ANALYSIS_TYPES,
                         metavar='ANALYSIS_TYPE',
                         help='analysis type %r' % ANALYSIS_TYPES,)
+    parser.add_argument('--period-sec', action='store', type=float,
+                        dest='period_sec',
+                        default=default_values['period_sec'],
+                        metavar='PERIOD_SEC',
+                        help='period in seconds',)
     parser.add_argument('--audio-jitter', action='store_const',
                         dest='analysis_type', const='audio-jitter',
                         metavar='ANALYSIS_TYPE',
