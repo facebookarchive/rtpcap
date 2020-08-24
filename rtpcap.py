@@ -314,6 +314,7 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
     out_data = []
     last_frame_time_relative = None
     last_frame_time_epoch = None
+    cum_pkts = 0
     cum_bits = 0
     rtp_seq_list = []
     rtp_timestamp_list = []
@@ -325,9 +326,11 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                                          options.period_sec):
             out_data.append([last_frame_time_relative,
                              last_frame_time_epoch,
+                             cum_pkts,
                              cum_bits,
                              rtp_seq_list,
                              rtp_timestamp_list])
+            cum_pkts = 0
             cum_bits = 0
             rtp_seq_list = []
             rtp_timestamp_list = []
@@ -340,18 +343,21 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
                 out_data.append([last_frame_time_relative + time_delta,
                                  last_frame_time_epoch + time_delta,
                                  0,
+                                 0,
                                  [],
                                  []])
 
             last_frame_time_relative = pkt['frame_time_relative']
             last_frame_time_epoch = pkt['frame_time_epoch']
         # account for current packet
+        cum_pkts += 1
         cum_bits += pkt['ip_len'] * 8
         rtp_seq_list.append(pkt['rtp_seq'])
         rtp_timestamp_list.append(pkt['rtp_timestamp'])
     # flush data
     out_data.append([last_frame_time_relative,
                      last_frame_time_epoch,
+                     cum_pkts,
                      cum_bits,
                      rtp_seq_list,
                      rtp_timestamp_list])
@@ -360,14 +366,14 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc,
     output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
         prefix, mode, ip_src, rtp_ssrc)
     with open(output_file, 'w') as f:
-        f.write('# %s,%s,%s,%s,%s\n' % (
-            'frame_time_relative', 'frame_time_epoch',
+        f.write('# %s,%s,%s,%s,%s,%s\n' % (
+            'frame_time_relative', 'frame_time_epoch', 'pkts',
             'bitrate_last_interval', 'rtp_seq_list', 'rtp_timestamp_list'))
-        for (frame_time_relative, frame_time_epoch, bits,
+        for (frame_time_relative, frame_time_epoch, cum_pkts, cum_bits,
                 rtp_seq_list, rtp_timestamp_list) in out_data:
-            f.write('%f,%f,%i,%s,%s\n' % (
-                frame_time_relative, frame_time_epoch,
-                int(bits / options.period_sec),
+            f.write('%f,%f,%i,%i,%s,%s\n' % (
+                frame_time_relative, frame_time_epoch, cum_pkts,
+                int(cum_bits / options.period_sec),
                 ':'.join([str(i) for i in rtp_seq_list]),
                 ':'.join([str(i) for i in rtp_timestamp_list])))
 
