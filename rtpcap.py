@@ -36,6 +36,7 @@ ANALYSIS_TYPES = {
     'audio-packet',
     'video-time',
     'video-frame',
+    'video-packet',
     'all',
 }
 
@@ -154,6 +155,24 @@ def get_rtp_p_type_list(parsed_rtp_list):
     return rtp_p_type_list
 
 
+def print_process_connection_information(parsed_rtp_list):
+    for ip_src in parsed_rtp_list.keys():
+        for rtp_ssrc in parsed_rtp_list[ip_src].keys():
+            ip_len = sum(d['ip_len'] for d in
+                         parsed_rtp_list[ip_src][rtp_ssrc])
+            duration = (parsed_rtp_list[ip_src][rtp_ssrc][-1]
+                        ['frame_time_epoch'] -
+                        parsed_rtp_list[ip_src][rtp_ssrc][0]
+                        ['frame_time_epoch'])
+            pkts = len(parsed_rtp_list[ip_src][rtp_ssrc])
+            rtp_p_type_list = get_rtp_p_type_list(
+                parsed_rtp_list[ip_src][rtp_ssrc])
+            print('ip_src: %s rtp_ssrc: %s rtp_p_type_list: %s '
+                  'ip_len: %i pkts: %i duration: %f' % (
+                      ip_src, rtp_ssrc, rtp_p_type_list, ip_len, pkts,
+                      duration))
+
+
 # process a single connection
 def process_connection(infile, conn, prefix, options):
     # create filter for full connection
@@ -167,21 +186,7 @@ def process_connection(infile, conn, prefix, options):
     # filter connection data
 
     if options.debug > 0:
-        for ip_src in parsed_rtp_list.keys():
-            for rtp_ssrc in parsed_rtp_list[ip_src].keys():
-                ip_len = sum(d['ip_len'] for d in
-                             parsed_rtp_list[ip_src][rtp_ssrc])
-                duration = (parsed_rtp_list[ip_src][rtp_ssrc][-1]
-                            ['frame_time_epoch'] -
-                            parsed_rtp_list[ip_src][rtp_ssrc][0]
-                            ['frame_time_epoch'])
-                pkts = len(parsed_rtp_list[ip_src][rtp_ssrc])
-                rtp_p_type_list = get_rtp_p_type_list(
-                    parsed_rtp_list[ip_src][rtp_ssrc])
-                print('ip_src: %s rtp_ssrc: %s rtp_p_type_list: %s '
-                      'ip_len: %i pkts: %i duration: %f' % (
-                          ip_src, rtp_ssrc, rtp_p_type_list, ip_len, pkts,
-                          duration))
+        print_process_connection_information(parsed_rtp_list)
 
     # analyze connections
     # if options.analysis_type == 'video':
@@ -224,6 +229,9 @@ def process_connection(infile, conn, prefix, options):
                     parsed_rtp_list, ip_src, rtp_ssrc, options.period_sec)
             elif options.analysis_type == 'video-frame':
                 out_data = analyze_video_frame(
+                    parsed_rtp_list, ip_src, rtp_ssrc)
+            elif options.analysis_type == 'video-packet':
+                out_data = analyze_video_packet(
                     parsed_rtp_list, ip_src, rtp_ssrc)
             # 2. dump data
             output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
@@ -615,6 +623,74 @@ def analyze_video_frame(parsed_rtp_list, ip_src, rtp_ssrc):
                      intra_latency,
                      inter_latency,
                      rtp_timestamp_latency])
+    return out_data
+
+
+OUTPUT_HEADERS['video-packet'] = (
+    'frame_time_relative', 'frame_time_epoch', 'rtp_timestamp', 'rtp_marker',
+    'bytes', 'frame_video_type', 'intra_latency',
+)
+
+
+# video-packet measures per-packet data, including:
+# (1) intra-frame latency: time between the first packet of the frame
+# corresponding to this packet, and the current packet.
+def analyze_video_packet(parsed_rtp_list, ip_src, rtp_ssrc):
+    # initialization
+    out_data = []
+    rtp_timestamp = None
+    first_frame_time_epoch = None
+    cum_pkts = 0
+    cum_bytes = 0
+    frame_video_type = 'P'
+    for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
+        # first packet
+        if rtp_timestamp is None or first_frame_time_epoch is None:
+            rtp_timestamp = pkt['rtp_timestamp']
+            first_frame_time_epoch = pkt['frame_time_epoch']
+            cum_pkts = 0
+            cum_bytes = 0
+            frame_video_type = 'P'
+        # check output
+        if pkt['rtp_timestamp'] > rtp_timestamp:
+            # new video frame: update frame information
+            rtp_timestamp = pkt['rtp_timestamp']
+            first_frame_time_epoch = pkt['frame_time_epoch']
+            cum_bytes = 0
+            cum_pkts = 0
+            frame_video_type = 'P'
+        else:
+            # check whether current frame video type is i-frame
+            if (cum_pkts == 1 and
+                    cum_bytes < 200 and
+                    (pkt['ip_len'] * 8) > (1000 * 8)):
+                # an i-frame is typically composed of a config frame
+                # (containing VPS/SPS/PPS in h265, SPS/PPS in h264),
+                # which is small (~150 bytes in h265, less in h264),
+                # followed by a series of large packets (>1000 bytes)
+                frame_video_type = 'I'
+        # dump info for current packet
+        intra_latency = pkt['frame_time_epoch'] - first_frame_time_epoch
+        out_data.append([pkt['frame_time_relative'],
+                         pkt['frame_time_epoch'],
+                         pkt['rtp_timestamp'],
+                         pkt['rtp_marker'],
+                         pkt['ip_len'],
+                         frame_video_type,
+                         intra_latency])
+        # account for current packet
+        cum_pkts += 1
+        cum_bytes += pkt['ip_len']
+
+    # flush data
+    intra_latency = pkt['frame_time_epoch'] - first_frame_time_epoch
+    out_data.append([pkt['frame_time_relative'],
+                     pkt['frame_time_epoch'],
+                     pkt['rtp_timestamp'],
+                     pkt['rtp_marker'],
+                     pkt['ip_len'],
+                     frame_video_type,
+                     intra_latency])
     return out_data
 
 
