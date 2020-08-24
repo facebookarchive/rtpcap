@@ -205,6 +205,14 @@ def analyze_audio_jitter(prefix, parsed_rtp_list, ip_src, rtp_ssrc, rtp_p_type,
             f.write('%f,%f,%f\n' % (frame_time_relative, delta, average_delta))
 
 
+# returns a number between [-32k, 32k)
+def rtp_ploss_diff(a, b):
+    mod = (a - b) % 65536
+    if mod >= 32768:
+        mod -= 65536
+    return mod
+
+
 def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, rtp_p_type,
                          options):
     output_file = '%s.audio.ploss.ip_src_%s.rtp_ssrc_%s.rtp_p_type_%i.csv' % (
@@ -214,7 +222,7 @@ def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, rtp_p_type,
         last_rtp_seq = -1
         for pkt in parsed_rtp_list[ip_src][rtp_ssrc][rtp_p_type]:
             if last_rtp_seq != -1:
-                delta = pkt['rtp_seq'] - last_rtp_seq
+                delta = rtp_ploss_diff(pkt['rtp_seq'], last_rtp_seq)
                 delta_list.append([pkt['frame_time_relative'], delta])
             last_rtp_seq = pkt['rtp_seq']
         for frame_time_relative, delta in delta_list:
