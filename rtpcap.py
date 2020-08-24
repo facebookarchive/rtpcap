@@ -4,6 +4,7 @@
 """rtpcap: RTP Pcap Trace Parser."""
 
 import argparse
+import hashlib
 import re
 import subprocess
 import sys
@@ -226,13 +227,27 @@ def analyze_audio_ploss(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
     with open(output_file, 'w') as f:
         delta_list = []
         last_rtp_seq = -1
+        # list of packet hashes
+        pkt_hash_set = set()
         for pkt in parsed_rtp_list[ip_src][rtp_ssrc]:
-            if last_rtp_seq != -1:
+            # check if we have seen the packet already
+            m = hashlib.md5()
+            pkt_id = '%s:%s:%s' % (pkt['rtp_p_type'], pkt['rtp_seq'],
+                                   pkt['rtp_timestamp'])
+            m.update(pkt_id.encode('utf-8'))
+            pkt_hash = m.hexdigest()
+            if pkt_hash in pkt_hash_set:
+                # packet is a duplicate
                 delta = rtp_ploss_diff(pkt['rtp_seq'], last_rtp_seq)
-                delta_list.append([pkt['frame_time_relative'], delta])
-            last_rtp_seq = pkt['rtp_seq']
-        for frame_time_relative, delta in delta_list:
-            f.write('%f,%i\n' % (frame_time_relative, delta))
+                delta_list.append([pkt['frame_time_relative'], delta, 'dup'])
+            else:
+                pkt_hash_set.add(pkt_hash)
+                if last_rtp_seq != -1:
+                    delta = rtp_ploss_diff(pkt['rtp_seq'], last_rtp_seq)
+                    delta_list.append([pkt['frame_time_relative'], delta, ''])
+                last_rtp_seq = pkt['rtp_seq']
+        for frame_time_relative, delta, dup in delta_list:
+            f.write('%f,%i,%s\n' % (frame_time_relative, delta, dup))
 
 
 def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
@@ -252,69 +267,6 @@ def analyze_network_bitrate(prefix, parsed_rtp_list, ip_src, rtp_ssrc, options):
             last_bits += pkt['ip_len'] * 8
         for frame_time_relative, delta in delta_list:
             f.write('%f,%i\n' % (frame_time_relative, delta))
-
-
-def get_video_rtp_p_type(p_type_dict, saddr, options):
-    # the video p_type is typically the one with the most markers (audio
-    # typically has 1 marker, data zero)
-    p_type_list = sorted(p_type_dict.items(), key=lambda x: x[1][1],
-                         reverse=True)
-    video_rtp_p_type = p_type_list[0][0]
-    if options.debug > 0:
-        for (p_type, (bitrate, markers)) in p_type_list:
-            print('# saddr: %s p_type: %s bitrate: %f markers: %i' % (
-                saddr, p_type, bitrate, markers))
-    return video_rtp_p_type
-
-
-def analyze_rtp_data(infile, conn_filter, sport, proto, options):
-    ip_src_field = '%s.src' % proto
-    ip_len_field = 'ip.len' if proto == 'ip' else 'ipv6.plen'
-    command = ('tshark -r %s '
-               '-d udp.port==%s,rtp '
-               '-Y "%s" '
-               '-n -T fields -e frame.number '
-               '-e frame.time_epoch -e frame.time_relative '
-               '-e %s -e %s '
-               '-e rtp.p_type -e rtcp.pt -e rtp.ssrc -e rtp.seq '
-               '-e rtp.timestamp -e rtp.marker' % (
-                   infile, sport, conn_filter, ip_src_field, ip_len_field))
-    returncode, out, err = run(command, options)
-    if returncode != 0:
-        print('Cannot run "%s": "%s"' % (command, err))
-        sys.exit(-1)
-    parsed_rtp_list, _ = parse_rtp_data(out, options)
-    return parsed_rtp_list
-
-
-def dump_video_statistics(video_statistics, saddr, conn_file):
-    outfile = '%s.src_%s.video.csv' % (conn_file, saddr)
-    with open(outfile, 'w') as f:
-        f.write('# frame_time_epoch, frame_time_relative, '
-                'sec_pkts, sec_bits, sec_frames, '
-                'sec_max_frame_pkts, sec_max_frame_bits, sec_rtp_seq_issues, '
-                'sec_frame_pkts\n')
-        for (frame_time_epoch, frame_time_relative,
-             sec_pkts, sec_bits, sec_frames,
-             sec_max_frame_pkts, sec_max_frame_bits, sec_rtp_seq_issues,
-             sec_frame_pkts) in video_statistics:
-            f.write('%f.%f,%i,%i,%i,%i,%i,%i,%s\n' % (
-                frame_time_epoch, frame_time_relative,
-                sec_pkts, sec_bits, sec_frames,
-                sec_max_frame_pkts, sec_max_frame_bits,
-                sec_rtp_seq_issues, sec_frame_pkts))
-    return 0
-
-
-def analyze_video_stream(rtp_pkt_list, video_rtp_p_type, options):
-    statistics = []
-    sec_pkts = 0
-    sec_bytes = 0
-    sec_frames = 0
-    sec_max_frame_pkts = 0
-    sec_max_frame_bytes = 0
-    sec_frame_pkts = []
-    sec_rtp_seq_issues = 0
 
 
 def get_video_rtp_p_type(p_type_dict, saddr, options):
