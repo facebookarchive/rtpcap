@@ -84,7 +84,19 @@ def get_addr_proto(addr):
 def parse_udp_connections(out, options):
     output = []
     # example: '192.168.1.32:5353          <-> 224.0.0.251:5353                 0         0       8      4276       8      4276     0.560657000         7.6643'
-    conn_pattern = r'(?P<laddr>[\da-fA-F\.\:]*):(?P<lport>\d*) * <-> (?P<raddr>[\da-fA-F\.\:]*):(?P<rport>\d*) *(?P<rpkts>\d*) *(?P<rbytes>\d*) *(?P<lpkts>\d*) *(?P<lbytes>\d*) *(?P<tpkts>\d*) *(?P<tbytes>\d*) *(?P<start>[\d\.]*) *(?P<duration>[\d\.]*)$'
+    conn_pattern = (
+        r'(?P<laddr>[\da-fA-F\.\:]*):(?P<lport>\d*) *'
+        r' <-> '
+        r'(?P<raddr>[\da-fA-F\.\:]*):(?P<rport>\d*) *'
+        r'(?P<rpkts>\d*) *'
+        r'(?P<rbytes>\d*) *'
+        r'(?P<lpkts>\d*) *'
+        r'(?P<lbytes>\d*) *'
+        r'(?P<tpkts>\d*) *'
+        r'(?P<tbytes>\d*) *'
+        r'(?P<start>[\d\.]*) *'
+        r'(?P<duration>[\d\.]*)$'
+    )
     for line in out.splitlines():
         line = line.decode('ascii').strip()
         match = re.search(conn_pattern, line)
@@ -147,7 +159,7 @@ def get_video_rtp_p_type(p_type_dict, saddr, options):
     if options.debug > 0:
         for (p_type, (bitrate, markers)) in p_type_list:
             print('# saddr: %s p_type: %s bitrate: %f markers: %i' % (
-						    saddr, p_type, bitrate, markers))
+                saddr, p_type, bitrate, markers))
     return video_rtp_p_type
 
 
@@ -303,9 +315,9 @@ def parse_rtp_data(out, saddr, options):
         r'(?P<frame_number>\d+)\t'
         r'(?P<frame_time_epoch>[\d\.]+)\t'
         r'(?P<ipsrc>[\da-fA-F\.\:]+)\t'
-        r'(?P<iplen>[\d]+)\t'
-        r'(?P<rtp_p_type>[\d]*)\t'  # optional
-        r'(?P<rtcp_pt>[\d]*)\t*'  # optional
+        r'(?P<iplen>\d+)\t'
+        r'(?P<rtp_p_type>\d*)\t'  # optional
+        r'(?P<rtcp_pt>\d*)\t*'  # optional
         r'(?P<rtp_seq>\d*)\t*'  # optional
         r'(?P<rtp_timestamp>\d*)\t*'  # optional
         r'(?P<rtp_marker>\d*)'  # optional
