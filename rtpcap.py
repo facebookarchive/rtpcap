@@ -83,8 +83,8 @@ def parse_file(infile, options):
         conn = udp_connections[i]
         if options.debug > 0:
             print('connection {{ left: {laddr}:{lport} '
-                   'right: {raddr}:{rport} proto: {proto} bytes: {tbytes} '
-                   'packets: {tpkts} }}'.format(**conn))
+                  'right: {raddr}:{rport} proto: {proto} bytes: {tbytes} '
+                  'packets: {tpkts} }}'.format(**conn))
         # process connection
         prefix = '%s.%s' % (infile, 'conn')
         process_connection(infile, conn, prefix, options)
@@ -92,7 +92,7 @@ def parse_file(infile, options):
 
 def tshark_error_check(returncode, out, err, command):
     if (returncode == 2 and
-            b'appears to have been cut short in the middle of a packet' in err):
+            b'have been cut short in the middle of a packet' in err):
         # we are ok with pcap traces cut short
         pass
     elif returncode != 0:
@@ -481,7 +481,8 @@ def analyze_video_time(parsed_rtp_list, ip_src, rtp_ssrc, period_sec):
             last_frame_time_relative = pkt['frame_time_relative']
             last_frame_time_epoch = pkt['frame_time_epoch']
             last_rtp_timestamp = pkt['rtp_timestamp']
-        if pkt['frame_time_relative'] > (last_frame_time_relative + period_sec):
+        if (pkt['frame_time_relative'] >
+                (last_frame_time_relative + period_sec)):
             out_data.append([last_frame_time_relative,
                              last_frame_time_epoch,
                              cum_frames,
@@ -942,12 +943,14 @@ def get_options(argv):
                         dest='connections',
                         default=default_values['connections'],
                         metavar='CONNECTIONS',
-                        help='number of connections',)
+                        help='number of connections [default: %i]' %
+                        default_values['connections'],)
     parser.add_argument('--period-sec', action='store', type=float,
                         dest='period_sec',
                         default=default_values['period_sec'],
                         metavar='PERIOD_SEC',
-                        help='period in seconds',)
+                        help='period in seconds [default: %f]' %
+                        default_values['period_sec'],)
     parser.add_argument('-a', '--analysis', action='store', type=str,
                         dest='analysis_type',
                         default=default_values['analysis_type'],
@@ -955,7 +958,8 @@ def get_options(argv):
                         metavar='ANALYSIS_TYPE',
                         help='analysis type %r' % ANALYSIS_TYPES,)
     for analysis in ANALYSIS_TYPES:
-        analysis_help = 'analysis type: %s (%r)' % (analysis,
+        analysis_help = 'analysis type: %s (%r)' % (
+            analysis,
             OUTPUT_HEADERS[analysis] if analysis != 'all' else '')
         parser.add_argument('--%s' % analysis, action='store_const',
                             dest='analysis_type', const=analysis,
