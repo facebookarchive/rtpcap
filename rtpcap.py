@@ -156,7 +156,8 @@ def get_rtp_p_type_list(parsed_rtp_list):
 
 
 def print_process_connection_information(parsed_rtp_list):
-    for ip_src in parsed_rtp_list.keys():
+    ip_src_list = sorted(list(parsed_rtp_list.keys()))
+    for ip_src in ip_src_list:
         # sort ssrc lines by payload type first, alphabetically second
         rtp_ssrc_list = list(parsed_rtp_list[ip_src].keys())
         rtp_ssrc_list = sorted(rtp_ssrc_list)
