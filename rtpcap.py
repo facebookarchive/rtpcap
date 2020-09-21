@@ -157,6 +157,7 @@ def get_rtp_p_type_list(parsed_rtp_list):
 
 def print_process_connection_information(parsed_rtp_list):
     ip_src_list = sorted(list(parsed_rtp_list.keys()))
+    i = 0
     for ip_src in ip_src_list:
         # sort ssrc lines by payload type first, alphabetically second
         rtp_ssrc_list = list(parsed_rtp_list[ip_src].keys())
@@ -175,10 +176,11 @@ def print_process_connection_information(parsed_rtp_list):
             pkts = len(parsed_rtp_list[ip_src][rtp_ssrc])
             rtp_p_type_list = get_rtp_p_type_list(
                 parsed_rtp_list[ip_src][rtp_ssrc])
-            print('ip_src: %s rtp_ssrc: %s rtp_p_type_list: %s '
+            print('id: %i ip_src: %s rtp_ssrc: %s rtp_p_type_list: %s '
                   'ip_len: %i pkts: %i duration: %f' % (
-                      ip_src, rtp_ssrc, rtp_p_type_list, ip_len, pkts,
+                      i, ip_src, rtp_ssrc, rtp_p_type_list, ip_len, pkts,
                       duration))
+            i += 1
 
 
 # process a single connection
