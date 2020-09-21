@@ -157,7 +157,7 @@ def get_rtp_p_type_list(parsed_rtp_list):
 
 OUTPUT_HEADERS['conn-info'] = (
     'id', 'ip_src', 'rtp_ssrc', 'rtp_p_type_list', 'ip_len', 'pkts',
-    'duration', 'output_file',
+    'duration', 'filename',
 )
 
 
