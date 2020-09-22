@@ -6,6 +6,7 @@
 import argparse
 import hashlib
 import re
+import os.path
 import subprocess
 import sys
 
@@ -207,7 +208,8 @@ def print_connection_information(conn_info, infile, analysis_type,
             rtp_ssrc = entry[2]
             output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
                 infile, analysis_type, ip_src, rtp_ssrc)
-            entry.append(output_file)
+            # only print basename
+            entry.append(os.path.basename(output_file))
             f.write(line_format % tuple(entry))
             if debug > 1:
                 print(' '.join(['%s: %s' % (k, v) for k, v in
