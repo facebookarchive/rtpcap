@@ -155,9 +155,25 @@ def get_rtp_p_type_list(parsed_rtp_list):
     return rtp_p_type_list
 
 
-def print_process_connection_information(parsed_rtp_list):
-    for ip_src in parsed_rtp_list.keys():
-        for rtp_ssrc in parsed_rtp_list[ip_src].keys():
+OUTPUT_HEADERS['conn-info'] = (
+    'id', 'ip_src', 'rtp_ssrc', 'rtp_p_type_list', 'ip_len', 'pkts',
+    'duration', 'filename',
+)
+
+
+def get_connection_information(parsed_rtp_list):
+    out_data = []
+    i = 0
+    ip_src_list = sorted(parsed_rtp_list.keys())
+    for ip_src in ip_src_list:
+        # sort ssrc lines by payload type first, alphabetically second
+        rtp_ssrc_list = list(parsed_rtp_list[ip_src].keys())
+        rtp_ssrc_list = sorted(rtp_ssrc_list)
+        rtp_ssrc_list = sorted(
+            rtp_ssrc_list,
+            key=lambda rtp_ssrc: get_rtp_p_type_list(
+                parsed_rtp_list[ip_src][rtp_ssrc])[0])
+        for rtp_ssrc in rtp_ssrc_list:
             ip_len = sum(d['ip_len'] for d in
                          parsed_rtp_list[ip_src][rtp_ssrc])
             duration = (parsed_rtp_list[ip_src][rtp_ssrc][-1]
@@ -167,10 +183,35 @@ def print_process_connection_information(parsed_rtp_list):
             pkts = len(parsed_rtp_list[ip_src][rtp_ssrc])
             rtp_p_type_list = get_rtp_p_type_list(
                 parsed_rtp_list[ip_src][rtp_ssrc])
-            print('ip_src: %s rtp_ssrc: %s rtp_p_type_list: %s '
-                  'ip_len: %i pkts: %i duration: %f' % (
-                      ip_src, rtp_ssrc, rtp_p_type_list, ip_len, pkts,
-                      duration))
+            out_data.append([i,
+                             ip_src,
+                             rtp_ssrc,
+                             ':'.join([str(i) for i in rtp_p_type_list]),
+                             ip_len,
+                             pkts,
+                             duration,
+                             ])
+            i += 1
+    return out_data
+
+
+def print_connection_information(conn_info, infile, analysis_type,
+                                 output_file, debug):
+    with open(output_file, 'w') as f:
+        out_hdr = OUTPUT_HEADERS['conn-info']
+        line_format = '%s\n' % ','.join(['%s'] * len(out_hdr))
+        header = '# ' + line_format
+        f.write(header % out_hdr)
+        for entry in conn_info:
+            ip_src = entry[1]
+            rtp_ssrc = entry[2]
+            output_file = '%s.%s.ip_src_%s.rtp_ssrc_%s.csv' % (
+                infile, analysis_type, ip_src, rtp_ssrc)
+            entry.append(output_file)
+            f.write(line_format % tuple(entry))
+            if debug > 1:
+                print(' '.join(['%s: %s' % (k, v) for k, v in
+                                zip(out_hdr, entry)]))
 
 
 # process a single connection
@@ -183,10 +224,15 @@ def process_connection(infile, conn, prefix, options):
 
     parsed_rtp_list = analyze_rtp_data(infile, conn_filter, conn['lport'],
                                        conn['proto'], options)
-    # filter connection data
 
-    if options.debug > 0:
-        print_process_connection_information(parsed_rtp_list)
+    # print connection information
+    output_file = '%s.%s.csv' % (infile, options.analysis_type)
+    conn_info = get_connection_information(parsed_rtp_list)
+    print_connection_information(conn_info,
+                                 infile,
+                                 options.analysis_type,
+                                 output_file,
+                                 options.debug)
 
     # analyze connections
     # if options.analysis_type == 'video':
